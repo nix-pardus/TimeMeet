@@ -1,0 +1,145 @@
+@page "/manage/{ShortCode}"
+@using TimeMeet.Application.Meetings
+@using TimeMeet.Domain.Entities
+@using TimeMeet.Domain.Enums
+@inject IMeetingService MeetingService
+@inject IHttpContextAccessor HttpContextAccessor
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Панель встречи — TimeMeet</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large">
+    @if (isLoading)
+    {
+        <MudSkeleton Height="48px" Width="55%" />
+        <MudSkeleton Height="180px" Class="mt-4" />
+    }
+    else if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled">@errorMessage</MudAlert>
+        <MudButton Href="/" Variant="Variant.Text" Class="mt-3">На главную</MudButton>
+    }
+    else if (meeting is not null)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-5">
+            <div>
+                <MudText Typo="Typo.h4">@meeting.Title</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Панель организатора</MudText>
+            </div>
+            <MudChip T="string" Color="Color.Success" Variant="Variant.Outlined">@GetStatusText(meeting.Status)</MudChip>
+        </MudStack>
+
+        @if (!string.IsNullOrWhiteSpace(meeting.Description))
+        {
+            <MudText Class="mb-4">@meeting.Description</MudText>
+        }
+
+        <MudGrid>
+            <MudItem xs="12" md="7">
+                <MudPaper Class="pa-5" Elevation="1">
+                    <MudText Typo="Typo.h6" GutterBottom="true">Поделиться ссылкой</MudText>
+                    <MudTextField Value="@ParticipantUrl" ReadOnly="true" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.ContentCopy" OnAdornmentClick="CopyLink" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">Код встречи: @meeting.ShortCode · Часовой пояс: @meeting.TimeZone</MudText>
+                    @if (linkCopied)
+                    {
+                        <MudAlert Severity="Severity.Success" Dense="true" Class="mt-3">Ссылка скопирована.</MudAlert>
+                    }
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="5">
+                <MudPaper Class="pa-5" Elevation="1">
+                    <MudText Typo="Typo.h6">Параметры</MudText>
+                    <MudList T="string" Dense="true">
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.Person">Организатор: @meeting.OrganizerName</MudListItem>
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.ViewAgenda">Режим: @GetModeText(meeting.AvailabilityMode)</MudListItem>
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.People">Ответили: @meeting.Participants.Count человек</MudListItem>
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.EventAvailable">Слотов: @meeting.TimeSlots.Count</MudListItem>
+                    </MudList>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="pa-5 mt-5" Elevation="1">
+            <MudText Typo="Typo.h6" GutterBottom="true">Предложенные слоты</MudText>
+            @if (meeting.TimeSlots.Count == 0)
+            {
+                <MudText Color="Color.Secondary">Слоты ещё не добавлены.</MudText>
+            }
+            else
+            {
+                <MudTable Items="meeting.TimeSlots.OrderBy(x => x.StartTime)" Hover="true" Dense="true">
+                    <HeaderContent>
+                        <MudTh>Начало</MudTh>
+                        <MudTh>Окончание</MudTh>
+                        <MudTh>Часовой пояс</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Начало">@context.StartTime.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+                        <MudTd DataLabel="Окончание">@context.EndTime.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+                        <MudTd DataLabel="Часовой пояс">UTC (локализация участника — на следующем этапе)</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudPaper>
+
+        <MudPaper Class="pa-5 mt-5" Elevation="1">
+            <MudText Typo="Typo.h6" GutterBottom="true">Ответившие участники</MudText>
+            @if (meeting.Participants.Count == 0)
+            {
+                <MudText Color="Color.Secondary">Пока никто не ответил. Отправьте ссылку участникам.</MudText>
+            }
+            else
+            {
+                <MudTable Items="meeting.Participants.OrderByDescending(x => x.UpdatedAt)" Hover="true" Dense="true">
+                    <HeaderContent><MudTh>Имя</MudTh><MudTh>Часовой пояс</MudTh><MudTh>Обновлено</MudTh></HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Имя">@context.DisplayName</MudTd>
+                        <MudTd DataLabel="Часовой пояс">@context.TimeZone</MudTd>
+                        <MudTd DataLabel="Обновлено">@context.UpdatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public string ShortCode { get; set; } = string.Empty;
+    private Meeting? meeting;
+    private bool isLoading = true;
+    private bool linkCopied;
+    private string? errorMessage;
+    private string ParticipantUrl => Navigation.ToAbsoluteUri($"/m/{ShortCode}").ToString();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var token = HttpContextAccessor.HttpContext?.Request.Cookies[$"timemeet-owner-{ShortCode}"];
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            errorMessage = "Панель доступна только организатору. Откройте ссылку управления, полученную после создания встречи.";
+            isLoading = false;
+            return;
+        }
+
+        meeting = await MeetingService.GetForOwnerAsync(ShortCode, token);
+        errorMessage = meeting is null ? "Встреча не найдена или ссылка управления недействительна." : null;
+        isLoading = false;
+    }
+
+    private async Task CopyLink()
+    {
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", ParticipantUrl);
+        linkCopied = true;
+    }
+
+    private static string GetStatusText(MeetingStatus status) => status switch
+    {
+        MeetingStatus.Active => "Активна",
+        MeetingStatus.Closed => "Закрыта",
+        MeetingStatus.Archived => "В архиве",
+        _ => "Черновик"
+    };
+
+    private static string GetModeText(AvailabilityMode mode) => mode == AvailabilityMode.FreeGrid ? "Свободная сетка" : "Фиксированные слоты";
+}

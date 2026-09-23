@@ -1,15 +1,19 @@
 ﻿@inherits LayoutComponentBase
+@inject IJSRuntime JS
 
-<MudThemeProvider />
+<MudThemeProvider IsDarkMode="isDarkMode" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="1">
-        <MudText Typo="Typo.h6">SchedulerApp</MudText>
+    <MudAppBar Fixed="false" Elevation="1">
+        <MudText Typo="Typo.h6">TimeMeet</MudText>
         <MudSpacer />
-        <MudIconButton Icon="@Icons.Material.Filled.DarkMode" Color="Color.Inherit" aria-label="Переключить тему" />
+        <MudIconButton Icon="@(isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                       Color="Color.Inherit"
+                       aria-label="Переключить тему"
+                       OnClick="ToggleTheme" />
     </MudAppBar>
     <MudMainContent Class="pa-4">
         @Body
@@ -21,4 +25,42 @@
     <a href="." class="reload">Перезагрузить</a>
     <span class="dismiss">??</span>
 </div>
+
+@code {
+    private bool isDarkMode;
+    private const string ThemeStorageKey = "timemeet-theme-dark";
+    private bool themeLoaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var savedTheme = await JS.InvokeAsync<string?>("localStorage.getItem", ThemeStorageKey);
+            if (bool.TryParse(savedTheme, out var savedIsDarkMode))
+            {
+                isDarkMode = savedIsDarkMode;
+            }
+            else
+            {
+                isDarkMode = await JS.InvokeAsync<bool>("timeMeetTheme.prefersDark");
+            }
+
+            themeLoaded = true;
+            StateHasChanged();
+            return;
+        }
+
+        if (themeLoaded)
+        {
+            themeLoaded = false;
+            await JS.InvokeVoidAsync("timeMeetTheme.show");
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        isDarkMode = !isDarkMode;
+        await JS.InvokeVoidAsync("localStorage.setItem", ThemeStorageKey, isDarkMode.ToString());
+    }
+}
 

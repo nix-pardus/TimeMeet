@@ -1,0 +1,172 @@
+@page "/create"
+@using System.ComponentModel.DataAnnotations
+@using TimeMeet.Application.Meetings
+@using TimeMeet.Domain.Enums
+@inject IMeetingService MeetingService
+@inject NavigationManager Navigation
+
+<PageTitle>Создать встречу — TimeMeet</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <MudPaper Class="pa-6" Elevation="2">
+        <MudText Typo="Typo.h4" GutterBottom="true">Создать встречу</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-6">
+            Укажите время в часовом поясе организатора. Участники увидят слоты в своём часовом поясе.
+        </MudText>
+
+        @if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@errorMessage</MudAlert>
+        }
+
+        <EditForm Model="model" OnValidSubmit="CreateAsync">
+            <DataAnnotationsValidator />
+            <MudTextField @bind-Value="model.Title" Label="Название встречи" Required="true" For="@(() => model.Title)" Class="mb-3" />
+            <MudTextField @bind-Value="model.OrganizerName" Label="Ваше имя" Required="true" For="@(() => model.OrganizerName)" Class="mb-3" />
+            <MudTextField @bind-Value="model.Description" Label="Описание" Lines="3" Class="mb-3" />
+            <MudTextField @bind-Value="model.TimeZone" Label="Часовой пояс (IANA)" HelperText="Например, Europe/Moscow или Asia/Yekaterinburg" Required="true" Class="mb-4" />
+
+            <MudText Typo="Typo.h6" Class="mb-2">Как собирать доступность?</MudText>
+            <MudRadioGroup @bind-Value="model.AvailabilityMode" Class="mb-4">
+                <MudRadio Value="AvailabilityMode.FixedSlots" Color="Color.Primary">Я предлагаю конкретные слоты</MudRadio>
+                <MudRadio Value="AvailabilityMode.FreeGrid" Color="Color.Primary">Участники отметят доступность в сетке</MudRadio>
+            </MudRadioGroup>
+
+            @if (model.AvailabilityMode == AvailabilityMode.FixedSlots)
+            {
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Первый предлагаемый слот</MudText>
+                <MudGrid Class="mb-3">
+                    <MudItem xs="12" sm="6"><MudDatePicker @bind-Date="model.StartDate" Label="Дата начала" Required="true" /></MudItem>
+                    <MudItem xs="12" sm="6"><MudTextField @bind-Value="model.StartTime" Label="Время начала" type="time" Required="true" /></MudItem>
+                    <MudItem xs="12" sm="6"><MudDatePicker @bind-Date="model.EndDate" Label="Дата окончания" Required="true" /></MudItem>
+                    <MudItem xs="12" sm="6"><MudTextField @bind-Value="model.EndTime" Label="Время окончания" type="time" Required="true" /></MudItem>
+                </MudGrid>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Дополнительные слоты можно будет добавить на следующем шаге.</MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Диапазон сетки</MudText>
+                <MudGrid Class="mb-3">
+                    <MudItem xs="12" sm="6"><MudDatePicker @bind-Date="model.GridStartDate" Label="Дата начала" Required="true" /></MudItem>
+                    <MudItem xs="12" sm="6"><MudDatePicker @bind-Date="model.GridEndDate" Label="Дата окончания" Required="true" /></MudItem>
+                    <MudItem xs="12" sm="6"><MudTextField @bind-Value="model.GridFrom" Label="С какого часа" type="time" Required="true" /></MudItem>
+                    <MudItem xs="12" sm="6"><MudTextField @bind-Value="model.GridTo" Label="До какого часа" type="time" Required="true" /></MudItem>
+                </MudGrid>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Ячейки сетки создаются с шагом 60 минут.</MudText>
+            }
+
+            <MudDivider Class="my-5" />
+            <MudTextField @bind-Value="model.Deadline" Label="Дедлайн голосования (необязательно)" type="datetime-local" />
+            <MudCheckBox @bind-Value="model.AllowAnonymous" Label="Разрешить анонимное голосование" Color="Color.Primary" />
+            <MudCheckBox @bind-Value="model.AllowRegistration" Label="Разрешить регистрацию участников" Color="Color.Primary" />
+            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" Class="mt-4" Disabled="isSaving">
+                @(isSaving ? "Создание…" : "Создать встречу")
+            </MudButton>
+        </EditForm>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private readonly CreateMeetingModel model = new();
+    private string? errorMessage;
+    private bool isSaving;
+
+    private async Task CreateAsync()
+    {
+        errorMessage = null;
+        isSaving = true;
+        try
+        {
+            var slots = model.AvailabilityMode == AvailabilityMode.FixedSlots
+                ? [CreateSlot(model.StartDate, model.StartTime, model.EndDate, model.EndTime)]
+                : CreateGridSlots();
+
+            var result = await MeetingService.CreateAsync(new CreateMeetingRequest
+            {
+                Title = model.Title,
+                Description = model.Description,
+                OrganizerName = model.OrganizerName,
+                TimeZone = model.TimeZone,
+                AvailabilityMode = model.AvailabilityMode,
+                Deadline = ParseDeadline(model.Deadline),
+                AllowAnonymous = model.AllowAnonymous,
+                AllowRegistration = model.AllowRegistration,
+                Slots = slots
+            });
+
+            Navigation.NavigateTo($"/manage-access/{result.Meeting.ShortCode}?token={Uri.EscapeDataString(result.OwnerToken)}", forceLoad: true);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or TimeZoneNotFoundException)
+        {
+            errorMessage = exception.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private IReadOnlyCollection<MeetingSlotRequest> CreateGridSlots()
+    {
+        if (model.GridStartDate is null || model.GridEndDate is null || model.GridEndDate < model.GridStartDate)
+        {
+            throw new ArgumentException("Дата окончания сетки должна быть не раньше даты начала.");
+        }
+
+        if (!TimeSpan.TryParse(model.GridFrom, out var from) || !TimeSpan.TryParse(model.GridTo, out var to) || to <= from)
+        {
+            throw new ArgumentException("Укажите корректный диапазон часов сетки.");
+        }
+
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById(model.TimeZone);
+        var slots = new List<MeetingSlotRequest>();
+        for (var date = model.GridStartDate.Value; date <= model.GridEndDate.Value; date = date.AddDays(1))
+        {
+            for (var time = from; time < to; time += TimeSpan.FromHours(1))
+            {
+                slots.Add(new MeetingSlotRequest(ToUtc(date.Date.Add(time), timeZone), ToUtc(date.Date.Add(time + TimeSpan.FromHours(1)), timeZone)));
+            }
+        }
+
+        return slots;
+    }
+
+    private MeetingSlotRequest CreateSlot(DateTime? startDate, string startTime, DateTime? endDate, string endTime)
+    {
+        if (startDate is null || endDate is null || !TimeSpan.TryParse(startTime, out var start) || !TimeSpan.TryParse(endTime, out var end))
+        {
+            throw new ArgumentException("Укажите дату и время слота.");
+        }
+
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById(model.TimeZone);
+        var startLocal = startDate.Value.Date.Add(start);
+        var endLocal = endDate.Value.Date.Add(end);
+        return new MeetingSlotRequest(ToUtc(startLocal, timeZone), ToUtc(endLocal, timeZone));
+    }
+
+    private static DateTimeOffset ToUtc(DateTime local, TimeZoneInfo timeZone) =>
+        new(TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), timeZone));
+
+    private static DateTimeOffset? ParseDeadline(string value) =>
+        DateTime.TryParse(value, out var deadline) ? new DateTimeOffset(deadline, TimeSpan.Zero) : null;
+
+    private sealed class CreateMeetingModel
+    {
+        [Required, StringLength(200)] public string Title { get; set; } = string.Empty;
+        [Required, StringLength(100)] public string OrganizerName { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        [Required] public string TimeZone { get; set; } = "Europe/Moscow";
+        public AvailabilityMode AvailabilityMode { get; set; } = AvailabilityMode.FixedSlots;
+        public DateTime? StartDate { get; set; } = DateTime.Today.AddDays(1);
+        public DateTime? EndDate { get; set; } = DateTime.Today.AddDays(1);
+        public string StartTime { get; set; } = "10:00";
+        public string EndTime { get; set; } = "11:00";
+        public DateTime? GridStartDate { get; set; } = DateTime.Today.AddDays(1);
+        public DateTime? GridEndDate { get; set; } = DateTime.Today.AddDays(7);
+        public string GridFrom { get; set; } = "09:00";
+        public string GridTo { get; set; } = "21:00";
+        public string Deadline { get; set; } = string.Empty;
+        public bool AllowAnonymous { get; set; } = true;
+        public bool AllowRegistration { get; set; } = true;
+    }
+}
