@@ -1,6 +1,12 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="TimeMeet.Application/TimeMeet.Application.csproj" Id="c2c585ad-3c81-4cae-86ca-bb15d22185aa" />
     <Project Path="TimeMeet.Domain/TimeMeet.Domain.csproj" />
     <Project Path="TimeMeet.Infrastructure/TimeMeet.Infrastructure.csproj" />
+    <Project Path="TimeMeet.Web/TimeMeet.Web.csproj" Id="fee248b8-fa14-400b-8542-1cf5ef25b960" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="TimeMeet.IntegrationTests/TimeMeet.IntegrationTests.csproj" Id="428db427-d108-46fc-bc36-0055353f2b40" />
+    <Project Path="TimeMeet.UnitTests/TimeMeet.UnitTests.csproj" Id="3cec84e2-face-4a69-b3c6-8ddfd8a725e6" />
   </Folder>
 </Solution>
