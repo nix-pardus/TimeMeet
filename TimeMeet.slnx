@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="TimeMeet.Domain/TimeMeet.Domain.csproj" />
+    <Project Path="TimeMeet.Infrastructure/TimeMeet.Infrastructure.csproj" />
+  </Folder>
+</Solution>
