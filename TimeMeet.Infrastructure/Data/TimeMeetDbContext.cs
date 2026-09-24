@@ -21,7 +21,9 @@ public sealed class TimeMeetDbContext(DbContextOptions<TimeMeetDbContext> option
 
         modelBuilder.Entity<Meeting>().HasKey(x => x.Id);
         modelBuilder.Entity<Meeting>().HasIndex(x => x.ShortCode).IsUnique();
+        modelBuilder.Entity<Meeting>().HasIndex(x => x.OwnerToken).IsUnique();
         modelBuilder.Entity<Meeting>().Property(x => x.ShortCode).HasMaxLength(10);
+        modelBuilder.Entity<Meeting>().Property(x => x.OwnerToken).HasMaxLength(64);
         modelBuilder.Entity<Meeting>().Property(x => x.Title).HasMaxLength(200);
         modelBuilder.Entity<Meeting>().Property(x => x.TimeZone).HasMaxLength(100);
         modelBuilder.Entity<Meeting>().HasOne(x => x.Organizer).WithMany(x => x.Meetings).HasForeignKey(x => x.OrganizerId).OnDelete(DeleteBehavior.SetNull);

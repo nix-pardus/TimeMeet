@@ -6,6 +6,7 @@ public sealed class Meeting
 {
     public Guid Id { get; set; }
     public required string ShortCode { get; set; }
+    public required string OwnerToken { get; set; }
     public required string Title { get; set; }
     public string? Description { get; set; }
     public Guid? OrganizerId { get; set; }
