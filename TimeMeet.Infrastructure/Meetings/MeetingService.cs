@@ -96,14 +96,19 @@ public sealed class MeetingService(TimeMeetDbContext dbContext) : IMeetingServic
             throw new ArgumentException("Укажите корректный часовой пояс.", nameof(request));
         }
 
+        if (request.ParticipationMode != ParticipationMode.LinkOnly)
+        {
+            throw new ArgumentException("В MVP доступно только голосование по ссылке.", nameof(request));
+        }
+
         if (request.Deadline is not null && request.Deadline <= DateTimeOffset.UtcNow)
         {
             throw new ArgumentException("Дедлайн должен быть в будущем.", nameof(request));
         }
 
-        if (request.AvailabilityMode == AvailabilityMode.FixedSlots && request.Slots.Count == 0)
+        if (request.Slots.Count == 0)
         {
-            throw new ArgumentException("Добавьте хотя бы один предлагаемый слот.", nameof(request));
+            throw new ArgumentException("Добавьте хотя бы один временной интервал.", nameof(request));
         }
 
         if (request.Slots.Any(x => x.EndTime <= x.StartTime || x.StartTime < DateTimeOffset.UtcNow.AddMinutes(-1)))

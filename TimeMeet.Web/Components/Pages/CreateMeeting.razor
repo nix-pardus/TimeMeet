@@ -88,7 +88,7 @@
                 OrganizerName = model.OrganizerName,
                 TimeZone = model.TimeZone,
                 AvailabilityMode = model.AvailabilityMode,
-                Deadline = ParseDeadline(model.Deadline),
+                 Deadline = ParseDeadline(model.Deadline, model.TimeZone),
                 AllowAnonymous = model.AllowAnonymous,
                 AllowRegistration = model.AllowRegistration,
                 Slots = slots
@@ -147,8 +147,22 @@
     private static DateTimeOffset ToUtc(DateTime local, TimeZoneInfo timeZone) =>
         new(TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), timeZone));
 
-    private static DateTimeOffset? ParseDeadline(string value) =>
-        DateTime.TryParse(value, out var deadline) ? new DateTimeOffset(deadline, TimeSpan.Zero) : null;
+    private static DateTimeOffset? ParseDeadline(string value, string timeZoneId)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!DateTime.TryParse(value, out var deadline))
+        {
+            throw new ArgumentException("Укажите корректный дедлайн.");
+        }
+
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        var localDeadline = DateTime.SpecifyKind(deadline, DateTimeKind.Unspecified);
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localDeadline, timeZone));
+    }
 
     private sealed class CreateMeetingModel
     {

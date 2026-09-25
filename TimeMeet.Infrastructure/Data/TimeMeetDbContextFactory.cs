@@ -8,7 +8,7 @@ public sealed class TimeMeetDbContextFactory : IDesignTimeDbContextFactory<TimeM
     public TimeMeetDbContext CreateDbContext(string[] args)
     {
         var builder = new DbContextOptionsBuilder<TimeMeetDbContext>();
-        builder.UseNpgsql("Host=localhost;Port=5432;Database=timemmetapp;Username=postgres;Password=postgres");
+        builder.UseNpgsql("Host=localhost;Port=5432;Database=timemeetapp;Username=postgres;Password=postgres");
         return new TimeMeetDbContext(builder.Options);
     }
 }
