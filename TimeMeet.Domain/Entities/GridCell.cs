@@ -1,14 +1,12 @@
-﻿namespace TimeMeet.Domain.Entities;
+namespace TimeMeet.Domain.Entities;
 
-public sealed class TimeSlot
+public sealed class GridCell
 {
     public Guid Id { get; set; }
     public Guid MeetingId { get; set; }
-    public Guid? SourceGridCellId { get; set; }
     public DateTimeOffset StartTime { get; set; }
     public DateTimeOffset EndTime { get; set; }
     public Meeting Meeting { get; set; } = null!;
-    public GridCell? SourceGridCell { get; set; }
     public ICollection<Availability> Availabilities { get; set; } = [];
-
+    public ICollection<TimeSlot> TimeSlots { get; set; } = [];
 }

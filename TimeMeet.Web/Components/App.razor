@@ -27,6 +27,9 @@
             prefersDark: () => window.matchMedia('(prefers-color-scheme: dark)').matches,
             show: () => document.getElementById('theme-loading-style')?.remove()
         };
+        window.timeMeet = {
+            getTimeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone
+        };
     </script>
     <script src="@Assets["_content/MudBlazor/MudBlazor.min.js"]"></script>
     <script src="@Assets["_framework/blazor.web.js"]"></script>

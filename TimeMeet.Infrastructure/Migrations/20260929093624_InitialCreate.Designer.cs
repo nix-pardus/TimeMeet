@@ -12,7 +12,7 @@ using TimeMeet.Infrastructure.Data;
 namespace TimeMeet.Infrastructure.Migrations
 {
     [DbContext(typeof(TimeMeetDbContext))]
-    [Migration("20260923182017_InitialCreate")]
+    [Migration("20260929093624_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -31,11 +31,11 @@ namespace TimeMeet.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset?>("FreeFrom")
+                    b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTimeOffset?>("FreeTo")
-                        .HasColumnType("timestamp with time zone");
+                    b.Property<Guid?>("GridCellId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid>("ParticipantId")
                         .HasColumnType("uuid");
@@ -46,13 +46,45 @@ namespace TimeMeet.Infrastructure.Migrations
                     b.Property<Guid?>("TimeSlotId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("GridCellId");
 
                     b.HasIndex("ParticipantId");
 
                     b.HasIndex("TimeSlotId");
 
-                    b.ToTable("Availabilities");
+                    b.ToTable("Availabilities", t =>
+                        {
+                            t.HasCheckConstraint("CK_Availability_ExactlyOneTarget", "(\"GridCellId\" IS NOT NULL AND \"TimeSlotId\" IS NULL) OR (\"GridCellId\" IS NULL AND \"TimeSlotId\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("TimeMeet.Domain.Entities.GridCell", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("EndTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MeetingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("StartTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MeetingId");
+
+                    b.HasIndex("MeetingId", "StartTime");
+
+                    b.ToTable("GridCells");
                 });
 
             modelBuilder.Entity("TimeMeet.Domain.Entities.Invitation", b =>
@@ -121,9 +153,6 @@ namespace TimeMeet.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("ArchivedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int>("AvailabilityMode")
-                        .HasColumnType("integer");
-
                     b.Property<DateTimeOffset?>("ClosedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -136,14 +165,44 @@ namespace TimeMeet.Infrastructure.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset?>("FinalDeadline")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly>("GridEndDate")
+                        .HasColumnType("date");
+
+                    b.Property<TimeOnly>("GridFrom")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<DateOnly>("GridStartDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("GridStepMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<TimeOnly>("GridTo")
+                        .HasColumnType("time without time zone");
+
                     b.Property<Guid?>("OrganizerId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("OrganizerName")
+                        .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("OwnerToken")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<int>("ParticipationMode")
                         .HasColumnType("integer");
+
+                    b.Property<int>("Phase")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("SelectedTimeSlotId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ShortCode")
                         .IsRequired()
@@ -166,6 +225,11 @@ namespace TimeMeet.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("OrganizerId");
+
+                    b.HasIndex("OwnerToken")
+                        .IsUnique();
+
+                    b.HasIndex("SelectedTimeSlotId");
 
                     b.HasIndex("ShortCode")
                         .IsUnique();
@@ -227,12 +291,17 @@ namespace TimeMeet.Infrastructure.Migrations
                     b.Property<Guid>("MeetingId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("SourceGridCellId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("StartTime")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
                     b.HasIndex("MeetingId");
+
+                    b.HasIndex("SourceGridCellId");
 
                     b.ToTable("TimeSlots");
                 });
@@ -273,6 +342,11 @@ namespace TimeMeet.Infrastructure.Migrations
 
             modelBuilder.Entity("TimeMeet.Domain.Entities.Availability", b =>
                 {
+                    b.HasOne("TimeMeet.Domain.Entities.GridCell", "GridCell")
+                        .WithMany("Availabilities")
+                        .HasForeignKey("GridCellId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("TimeMeet.Domain.Entities.Participant", "Participant")
                         .WithMany("Availabilities")
                         .HasForeignKey("ParticipantId")
@@ -284,9 +358,22 @@ namespace TimeMeet.Infrastructure.Migrations
                         .HasForeignKey("TimeSlotId")
                         .OnDelete(DeleteBehavior.Cascade);
 
+                    b.Navigation("GridCell");
+
                     b.Navigation("Participant");
 
                     b.Navigation("TimeSlot");
+                });
+
+            modelBuilder.Entity("TimeMeet.Domain.Entities.GridCell", b =>
+                {
+                    b.HasOne("TimeMeet.Domain.Entities.Meeting", "Meeting")
+                        .WithMany("GridCells")
+                        .HasForeignKey("MeetingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Meeting");
                 });
 
             modelBuilder.Entity("TimeMeet.Domain.Entities.Invitation", b =>
@@ -312,6 +399,11 @@ namespace TimeMeet.Infrastructure.Migrations
                     b.HasOne("TimeMeet.Domain.Entities.User", "Organizer")
                         .WithMany("Meetings")
                         .HasForeignKey("OrganizerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("TimeMeet.Domain.Entities.TimeSlot", null)
+                        .WithMany()
+                        .HasForeignKey("SelectedTimeSlotId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Organizer");
@@ -343,11 +435,27 @@ namespace TimeMeet.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("TimeMeet.Domain.Entities.GridCell", "SourceGridCell")
+                        .WithMany("TimeSlots")
+                        .HasForeignKey("SourceGridCellId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Meeting");
+
+                    b.Navigation("SourceGridCell");
+                });
+
+            modelBuilder.Entity("TimeMeet.Domain.Entities.GridCell", b =>
+                {
+                    b.Navigation("Availabilities");
+
+                    b.Navigation("TimeSlots");
                 });
 
             modelBuilder.Entity("TimeMeet.Domain.Entities.Meeting", b =>
                 {
+                    b.Navigation("GridCells");
+
                     b.Navigation("Invitations");
 
                     b.Navigation("Participants");
