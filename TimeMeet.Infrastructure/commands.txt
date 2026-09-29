@@ -1,0 +1,2 @@
+﻿dotnet ef migrations add InitialCreate --project TimeMeet.Infrastructure --startup-project TimeMeet.Web --output-dir Migrations
+dotnet ef database update --project TimeMeet.Infrastructure --startup-project TimeMeet.Web
