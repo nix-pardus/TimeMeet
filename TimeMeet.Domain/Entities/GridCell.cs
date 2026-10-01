@@ -8,5 +8,4 @@ public sealed class GridCell
     public DateTimeOffset EndTime { get; set; }
     public Meeting Meeting { get; set; } = null!;
     public ICollection<Availability> Availabilities { get; set; } = [];
-    public ICollection<TimeSlot> TimeSlots { get; set; } = [];
 }

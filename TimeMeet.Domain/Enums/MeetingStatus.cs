@@ -2,8 +2,8 @@
 
 public enum MeetingStatus
 {
-    Draft, 
-    Active, 
-    Closed, 
-    Archived
+    Active,
+    Closed,
+    Archived,
+    Deleted
 }

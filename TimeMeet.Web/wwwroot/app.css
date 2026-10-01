@@ -36,3 +36,64 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+.timemeet-grid-wrap {
+    max-width: 100%;
+    max-height: 70vh;
+    overflow: auto;
+    border: 1px solid var(--mud-palette-lines-default);
+}
+
+.timemeet-grid {
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: max-content;
+    width: 100%;
+}
+
+.timemeet-grid th,
+.timemeet-grid td {
+    border-right: 1px solid var(--mud-palette-lines-default);
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+}
+
+.timemeet-hour-header {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    min-width: 64px;
+    padding: 4px 8px;
+    background: var(--mud-palette-surface);
+    text-align: right;
+    white-space: nowrap;
+}
+
+.timemeet-day-header {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    min-width: 120px;
+    padding: 8px;
+    background: var(--mud-palette-surface);
+    text-align: center;
+}
+
+.timemeet-cell {
+    width: 30px;
+    height: 30px;
+    min-width: 24px;
+    padding: 0;
+    background: #e5e7eb;
+    cursor: pointer;
+}
+
+.timemeet-cell:hover { outline: 2px solid #1976d2; outline-offset: -2px; }
+.timemeet-cell.available, .timemeet-cell.all-available { background: #43a047; }
+.timemeet-cell.needed, .timemeet-cell.all-needed { background: #fbc02d; }
+.timemeet-cell.all-empty { background: #e5e7eb; cursor: default; }
+.timemeet-cell.missing { background: transparent; cursor: default; }
+
+@media (max-width: 700px) {
+    .timemeet-cell { width: 24px; height: 30px; }
+    .timemeet-hour-header { min-width: 56px; padding: 4px; }
+}

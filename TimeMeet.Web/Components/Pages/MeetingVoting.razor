@@ -9,56 +9,287 @@
 @inject IJSRuntime JSRuntime
 
 <PageTitle>Голосование — TimeMeet</PageTitle>
+
 <MudContainer MaxWidth="MaxWidth.Large">
-@if (isLoading) { <MudSkeleton Height="220px" /> }
-else if (!string.IsNullOrWhiteSpace(errorMessage)) { <MudAlert Severity="Severity.Error">@errorMessage</MudAlert> }
-else if (meeting is not null && participant is null) {
-    <MudPaper Class="pa-6"><MudText Typo="Typo.h4">@meeting.Title</MudText><MudText Class="mb-4">Организатор: @meeting.OrganizerName</MudText>
-    <EditForm Model="participantModel" OnValidSubmit="CreateParticipantAsync"><DataAnnotationsValidator /><MudTextField @bind-Value="participantModel.DisplayName" Label="Ваше имя" Required="true" /><MudTextField @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" /><MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="mt-4">Продолжить</MudButton></EditForm></MudPaper>
-}
-else if (meeting is not null && participant is not null) {
-    <MudText Typo="Typo.h4" Class="mb-2">@meeting.Title</MudText>
-    <MudText Color="Color.Secondary" Class="mb-4">Фаза: @(meeting.Phase == MeetingPhase.AvailabilityCollection ? "Сбор доступности" : "Финальное голосование") · @participant.DisplayName</MudText>
-    @if (!canEdit) { <MudAlert Severity="Severity.Info" Class="mb-4">Новые отметки недоступны: голосование закрыто или срок текущей фазы истёк.</MudAlert> }
-    <MudPaper Class="pa-4">
-        <MudText Typo="Typo.h6">@(meeting.Phase == MeetingPhase.AvailabilityCollection ? "Свободная сетка" : "Финальные варианты")</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">Нажимайте на ячейку: свободен → если нужно → не могу.</MudText>
-        <MudTable Items="targets" Hover="true" Dense="true">
-            <HeaderContent><MudTh>Время</MudTh><MudTh>Моя доступность</MudTh></HeaderContent>
-            <RowTemplate>
-                <MudTd DataLabel="Время">@FormatSlot(context.StartTime) — @FormatTime(context.EndTime)</MudTd>
-                <MudTd DataLabel="Моя доступность"><MudButton Variant="Variant.Filled" Size="Size.Small" Color="GetStatusColor(GetStatus(context.Id))" Disabled="@(!canEdit || isSaving)" OnClick="@(() => CycleStatus(context.Id))">@GetStatusText(GetStatus(context.Id))</MudButton></MudTd>
-            </RowTemplate>
-        </MudTable>
-        @if (isSaving) { <MudText Typo="Typo.caption">Сохранение…</MudText> } else if (hasSavedChanges) { <MudText Typo="Typo.caption" Color="Color.Success">Сохранено</MudText> }
-    </MudPaper>
-}
+    @if (isLoading)
+    {
+        <MudSkeleton Height="240px" />
+    }
+    else if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <MudAlert Severity="Severity.Error">@errorMessage</MudAlert>
+    }
+    else if (meeting is not null && participant is null)
+    {
+        @if (meeting.Status == MeetingStatus.Deleted)
+        {
+            <MudAlert Severity="Severity.Warning">Встреча удалена организатором.</MudAlert>
+        }
+        else
+        {
+        <MudPaper Class="pa-6">
+            <MudText Typo="Typo.h4">@meeting.Title</MudText>
+            @if (!string.IsNullOrWhiteSpace(meeting.Description))
+            {
+                <MudText Class="mb-3">@meeting.Description</MudText>
+            }
+            <MudText Color="Color.Secondary">Организатор: @meeting.OrganizerName</MudText>
+            <EditForm Model="participantModel" OnValidSubmit="CreateParticipantAsync" class="mt-5">
+                <DataAnnotationsValidator />
+                <MudTextField @bind-Value="participantModel.DisplayName" Label="Ваше имя" Required="true" />
+                <MudTextField @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" Class="mt-3" />
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="mt-4">Продолжить</MudButton>
+            </EditForm>
+        </MudPaper>
+        }
+    }
+    else if (meeting is not null && participant is not null)
+    {
+        <MudText Typo="Typo.h4">@meeting.Title</MudText>
+        <MudText Color="Color.Secondary" Class="mb-4">@participant.DisplayName · @participant.TimeZone</MudText>
+
+        @if (meeting.Status != MeetingStatus.Active)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-4">
+                Встреча закрыта. Новые отметки недоступны.
+            </MudAlert>
+        }
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-3">
+            <MudButton Variant="@(showAll ? Variant.Outlined : Variant.Filled)" OnClick="@(() => showAll = false)">Моя доступность</MudButton>
+            <MudButton Variant="@(showAll ? Variant.Filled : Variant.Outlined)" OnClick="@(() => showAll = true)">Показать всех</MudButton>
+            <MudCheckBox T="bool" Value="noSuitableTime" ValueChanged="SetNoSuitableTimeAsync" Label="Ни одно время не подходит" Disabled="@(!canEdit || showAll)" />
+        </MudStack>
+
+        @if (showAll)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">Агрегированная карта доступности участников</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">@participant.DisplayName · @participant.TimeZone</MudText>
+        }
+
+        <div class="timemeet-grid-wrap">
+            <table class="timemeet-grid">
+                <thead>
+                    <tr>
+                        <th class="timemeet-hour-header">Время</th>
+                        @foreach (var day in days)
+                        {
+                            <th colspan="@slotsPerHour" class="timemeet-day-header">@FormatDay(day)</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (var hour = 0; hour < 24; hour++)
+                    {
+                        <tr>
+                            <th class="timemeet-hour-header">@($"{hour:00}:00")</th>
+                            @foreach (var day in days)
+                            {
+                                @foreach (var cell in GetCells(day, hour))
+                                {
+                                    <td class="@GetCellClass(cell)" title="@GetCellTitle(cell)" @onclick="@(() => ChangeCellAsync(cell.Id))">
+                                        <span></span>
+                                    </td>
+                                }
+                                @for (var empty = GetCells(day, hour).Count; empty < slotsPerHour; empty++)
+                                {
+                                    <td class="timemeet-cell missing"><span></span></td>
+                                }
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (isSaving)
+        {
+            <MudText Typo="Typo.caption">Сохранение…</MudText>
+        }
+        else if (hasSavedChanges)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Success">Сохранено</MudText>
+        }
+    }
 </MudContainer>
 
 @code {
     [Parameter] public string ShortCode { get; set; } = string.Empty;
-    private Meeting? meeting; private Participant? participant; private readonly ParticipantModel participantModel = new(); private readonly Dictionary<Guid, AvailabilityStatus> statuses = []; private CancellationTokenSource? saveCancellation; private bool isLoading = true; private bool isSaving; private bool hasSavedChanges; private bool timeZoneInitialized; private string? errorMessage;
-    private bool canEdit => meeting is not null && meeting.Status == MeetingStatus.Active && IsCurrentPhaseOpen();
-    private IEnumerable<TimeTarget> targets => meeting is null ? [] : meeting.Phase == MeetingPhase.AvailabilityCollection ? meeting.GridCells.Select(x => new TimeTarget(x.Id, x.StartTime, x.EndTime)) : meeting.TimeSlots.Select(x => new TimeTarget(x.Id, x.StartTime, x.EndTime));
-    private bool IsCurrentPhaseOpen() { var deadline = meeting!.Phase == MeetingPhase.AvailabilityCollection ? meeting.Deadline : meeting.FinalDeadline; return deadline is null || deadline > DateTimeOffset.UtcNow; }
+
+    private Meeting? meeting;
+    private Participant? participant;
+    private readonly ParticipantModel participantModel = new();
+    private readonly Dictionary<Guid, AvailabilityStatus> statuses = [];
+    private readonly Dictionary<Guid, (int Available, int IfNeeded, int Cannot)> aggregate = [];
+    private CancellationTokenSource? saveCancellation;
+    private bool isLoading = true;
+    private bool isSaving;
+    private bool hasSavedChanges;
+    private bool showAll;
+    private bool noSuitableTime;
+    private bool timeZoneInitialized;
+    private string? errorMessage;
+
+    private bool canEdit => meeting?.Status == MeetingStatus.Active && !showAll;
+    private int slotsPerHour => meeting is null ? 1 : 60 / meeting.GridStepMinutes;
+    private IReadOnlyList<DateOnly> days => meeting is null
+        ? []
+        : Enumerable.Range(0, meeting.GridEndDate.DayNumber - meeting.GridStartDate.DayNumber + 1)
+            .Select(meeting.GridStartDate.AddDays).ToArray();
 
     protected override async Task OnInitializedAsync()
     {
-        var token = HttpContextAccessor.HttpContext?.Request.Cookies[$"timemeet-participant-{ShortCode}"]; var access = await MeetingService.GetForParticipantAsync(ShortCode, token);
-        if (access is null) { errorMessage = "Встреча не найдена."; isLoading = false; return; }
-        meeting = access.Meeting; participant = access.Participant;
-        if (participant is not null) foreach (var answer in participant.Availabilities.Where(x => meeting.Phase == MeetingPhase.AvailabilityCollection ? x.GridCellId is not null : x.TimeSlotId is not null)) statuses[(answer.GridCellId ?? answer.TimeSlotId)!.Value] = answer.Status;
+        var token = HttpContextAccessor.HttpContext?.Request.Cookies[$"timemeet-participant-{ShortCode}"];
+        var access = await MeetingService.GetForParticipantAsync(ShortCode, token);
+        if (access is null)
+        {
+            errorMessage = "Встреча не найдена.";
+            isLoading = false;
+            return;
+        }
+
+        meeting = access.Meeting;
+        participant = access.Participant;
+        if (participant is not null)
+        {
+            noSuitableTime = participant.HasNoSuitableTime;
+            foreach (var answer in participant.Availabilities)
+                statuses[answer.GridCellId] = answer.Status;
+            RebuildAggregate();
+        }
         isLoading = false;
     }
-    protected override async Task OnAfterRenderAsync(bool firstRender) { if (!firstRender || timeZoneInitialized || participant is not null) return; timeZoneInitialized = true; try { participantModel.TimeZone = await JSRuntime.InvokeAsync<string>("timeMeet.getTimeZone"); await InvokeAsync(StateHasChanged); } catch (JSException) { } }
-    private async Task CreateParticipantAsync() { try { var result = await MeetingService.CreateParticipantAsync(ShortCode, participantModel.DisplayName, participantModel.TimeZone); Navigation.NavigateTo($"/participant-access/{Uri.EscapeDataString(ShortCode)}?token={Uri.EscapeDataString(result.ParticipantToken)}", true); } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { errorMessage = ex.Message; } }
-    private void CycleStatus(Guid id) { if (!canEdit) return; statuses[id] = statuses.TryGetValue(id, out var value) ? value switch { AvailabilityStatus.Available => AvailabilityStatus.IfNeeded, AvailabilityStatus.IfNeeded => AvailabilityStatus.Unavailable, _ => AvailabilityStatus.Available } : AvailabilityStatus.Available; hasSavedChanges = false; _ = ScheduleSaveAsync(); }
-    private async Task ScheduleSaveAsync() { saveCancellation?.Cancel(); saveCancellation = new(); var ct = saveCancellation.Token; try { await Task.Delay(1000, ct); isSaving = true; await InvokeAsync(StateHasChanged); await MeetingService.SaveAvailabilityAsync(ShortCode, participant!.ParticipantToken, statuses.Select(x => new AvailabilitySelection(x.Key, x.Value)).ToArray(), ct); hasSavedChanges = true; } catch (OperationCanceledException) when (ct.IsCancellationRequested) { } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { errorMessage = ex.Message; } finally { if (!ct.IsCancellationRequested) { isSaving = false; await InvokeAsync(StateHasChanged); } } }
-    private AvailabilityStatus? GetStatus(Guid id) => statuses.TryGetValue(id, out var value) ? value : null;
-    private string FormatSlot(DateTimeOffset value) => FormatTimeZone(value, "dd.MM.yyyy HH:mm"); private string FormatTime(DateTimeOffset value) => FormatTimeZone(value, "HH:mm");
-    private string FormatTimeZone(DateTimeOffset value, string format) { var id = participant?.TimeZone ?? participantModel.TimeZone; return TimeZoneInfo.TryFindSystemTimeZoneById(id, out var zone) ? TimeZoneInfo.ConvertTime(value, zone).ToString(format) : value.ToString(format); }
-    private static string GetStatusText(AvailabilityStatus? value) => value switch { AvailabilityStatus.Available => "Свободен", AvailabilityStatus.IfNeeded => "Если нужно", AvailabilityStatus.Unavailable => "Не могу", _ => "Не отмечено" };
-    private static Color GetStatusColor(AvailabilityStatus? value) => value switch { AvailabilityStatus.Available => Color.Success, AvailabilityStatus.IfNeeded => Color.Warning, AvailabilityStatus.Unavailable => Color.Error, _ => Color.Default };
-    private sealed record TimeTarget(Guid Id, DateTimeOffset StartTime, DateTimeOffset EndTime);
-    private sealed class ParticipantModel { [Required] public string DisplayName { get; set; } = string.Empty; [Required] public string TimeZone { get; set; } = "Europe/Moscow"; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || timeZoneInitialized || participant is not null) return;
+        timeZoneInitialized = true;
+        try
+        {
+            participantModel.TimeZone = await JSRuntime.InvokeAsync<string>("timeMeet.getTimeZone");
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (JSException) { }
+    }
+
+    private async Task CreateParticipantAsync()
+    {
+        try
+        {
+            var ownerToken = HttpContextAccessor.HttpContext?.Request.Cookies[$"timemeet-owner-{ShortCode}"];
+            var result = await MeetingService.CreateParticipantAsync(ShortCode, participantModel.DisplayName, participantModel.TimeZone, ownerToken);
+            Navigation.NavigateTo($"/participant-access/{Uri.EscapeDataString(ShortCode)}?token={Uri.EscapeDataString(result.ParticipantToken)}", true);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task ChangeCellAsync(Guid cellId)
+    {
+        if (!canEdit || meeting is null || participant is null) return;
+        statuses[cellId] = statuses.TryGetValue(cellId, out var value)
+            ? value switch { AvailabilityStatus.Available => AvailabilityStatus.IfNeeded, _ => AvailabilityStatus.Available }
+            : AvailabilityStatus.Available;
+        noSuitableTime = false;
+        hasSavedChanges = false;
+        ScheduleSave();
+        await Task.CompletedTask;
+    }
+
+    private void ScheduleSave()
+    {
+        saveCancellation?.Cancel();
+        saveCancellation = new CancellationTokenSource();
+        _ = SaveAfterDelayAsync(saveCancellation.Token);
+    }
+
+    private async Task SaveAfterDelayAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(1000, cancellationToken);
+            isSaving = true;
+            await InvokeAsync(StateHasChanged);
+            await MeetingService.SaveAvailabilityAsync(ShortCode, participant!.ParticipantToken,
+                statuses.Select(x => new AvailabilitySelection(x.Key, x.Value)).ToArray(), cancellationToken);
+            hasSavedChanges = true;
+            RebuildAggregate();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                isSaving = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private async Task SetNoSuitableTimeAsync(bool value)
+    {
+        noSuitableTime = value;
+        try
+        {
+            if (value) statuses.Clear();
+            await MeetingService.SetNoSuitableTimeAsync(ShortCode, participant!.ParticipantToken, value);
+            RebuildAggregate();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private void RebuildAggregate()
+    {
+        aggregate.Clear();
+        if (meeting is null) return;
+        var voters = meeting.Participants.Where(x => x.HasNoSuitableTime || x.Availabilities.Count > 0).ToArray();
+        foreach (var cell in meeting.GridCells)
+        {
+            var available = cell.Availabilities.Count(x => x.Status == AvailabilityStatus.Available);
+            var ifNeeded = cell.Availabilities.Count(x => x.Status == AvailabilityStatus.IfNeeded);
+            var cannot = voters.Count(x => !cell.Availabilities.Any(a => a.ParticipantId == x.Id));
+            aggregate[cell.Id] = (available, ifNeeded, cannot);
+        }
+    }
+
+    private IReadOnlyList<GridCell> GetCells(DateOnly day, int hour) => meeting?.GridCells
+        .Where(x => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(x.StartTime, FindZone(meeting.TimeZone)).DateTime) == day && TimeZoneInfo.ConvertTime(x.StartTime, FindZone(meeting.TimeZone)).Hour == hour)
+        .OrderBy(x => x.StartTime).ToArray() ?? [];
+
+    private string GetCellClass(GridCell cell)
+    {
+        if (showAll && aggregate.TryGetValue(cell.Id, out var value))
+            return value.Available > 0 ? "timemeet-cell all-available" : value.IfNeeded > 0 ? "timemeet-cell all-needed" : "timemeet-cell all-empty";
+        return statuses.TryGetValue(cell.Id, out var status) ? status switch
+        {
+            AvailabilityStatus.Available => "timemeet-cell available",
+            AvailabilityStatus.IfNeeded => "timemeet-cell needed",
+            _ => "timemeet-cell"
+        } : "timemeet-cell";
+    }
+
+    private string GetCellTitle(GridCell cell) => $"{FormatTime(cell.StartTime)}–{FormatTime(cell.EndTime)}";
+    private string FormatDay(DateOnly date) => date.ToDateTime(TimeOnly.MinValue).ToString("ddd, d MMM", new System.Globalization.CultureInfo("ru-RU"));
+    private string FormatTime(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, FindZone(participant?.TimeZone ?? meeting!.TimeZone)).ToString("HH:mm");
+    private static TimeZoneInfo FindZone(string id) => TimeZoneInfo.FindSystemTimeZoneById(id);
+
+    private int GetCellsCount(DateOnly day, int hour) => GetCells(day, hour).Count;
+
+    private sealed class ParticipantModel
+    {
+        [Required, StringLength(50)] public string DisplayName { get; set; } = string.Empty;
+        [Required] public string TimeZone { get; set; } = "Europe/Moscow";
+    }
 }

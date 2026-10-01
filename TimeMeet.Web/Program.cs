@@ -1,97 +1,130 @@
+using System.Security.Cryptography;
+using Hangfire;
+using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
 using TimeMeet.Application.Meetings;
+using TimeMeet.Domain.Enums;
 using TimeMeet.Infrastructure.Data;
-using TimeMeet.Infrastructure.Meetings;
 using TimeMeet.Infrastructure.Export;
+using TimeMeet.Infrastructure.Meetings;
+using TimeMeet.Infrastructure.Retention;
 using TimeMeet.Web.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IMeetingService, MeetingService>();
 builder.Services.AddScoped<ICalendarExporter, CalendarExporter>();
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Host=localhost;Port=5432;Database=timemeetapp;Username=postgres;Password=postgress";
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? "Host=localhost;Port=5432;Database=timemeetapp;Username=postgres;Password=postgress";
 builder.Services.AddDbContext<TimeMeetDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddScoped<MeetingRetentionJob>();
+builder.Services.AddHangfire(configuration => configuration
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UsePostgreSqlStorage(options => options.UseNpgsqlConnection(connectionString)));
+builder.Services.AddHangfireServer();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
+
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
 
-app.UseAntiforgery();
-
-app.MapGet("/manage-access/{shortCode}", (HttpContext httpContext, string shortCode, string token) =>
+app.Use(async (context, next) =>
 {
-    if (string.IsNullOrWhiteSpace(token))
+    if (context.Request.Path.StartsWithSegments("/manage"))
     {
-        return Results.BadRequest("Токен владельца не указан.");
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+
+        var key = context.Request.Query["key"].ToString();
+        var shortCode = GetManageShortCode(context.Request.Path);
+        if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(shortCode))
+        {
+            var db = context.RequestServices.GetRequiredService<TimeMeetDbContext>();
+            var meeting = await db.Meetings.IgnoreQueryFilters()
+                .SingleOrDefaultAsync(x => x.ShortCode == shortCode, context.RequestAborted);
+
+            if (meeting is not null && meeting.Status != MeetingStatus.Deleted && SecureEquals(key, meeting.OwnerToken))
+            {
+                context.Response.Cookies.Append($"timemeet-owner-{shortCode}", meeting.OwnerToken, CreateOwnerCookieOptions(app.Environment.IsDevelopment()));
+                context.Response.Redirect($"/manage/{Uri.EscapeDataString(shortCode)}");
+                return;
+            }
+        }
     }
 
-    httpContext.Response.Cookies.Append($"timemeet-owner-{shortCode}", token, new CookieOptions
-    {
-        HttpOnly = true,
-        Secure = !app.Environment.IsDevelopment(),
-        SameSite = SameSiteMode.Lax,
-        MaxAge = TimeSpan.FromDays(90),
-        IsEssential = true
-    });
-
-app.MapGet("/export/{shortCode}/{format}", async (HttpContext httpContext, string shortCode, string format, IMeetingService meetingService, ICalendarExporter calendarExporter) =>
-{
-    var token = httpContext.Request.Cookies[$"timemeet-owner-{shortCode}"];
-    var meeting = string.IsNullOrWhiteSpace(token) ? null : await meetingService.GetForOwnerAsync(shortCode, token);
-    if (meeting?.Status != TimeMeet.Domain.Enums.MeetingStatus.Closed || meeting.SelectedTimeSlotId is null) return Results.NotFound();
-    var slot = meeting.TimeSlots.SingleOrDefault(x => x.Id == meeting.SelectedTimeSlotId);
-    if (slot is null) return Results.NotFound();
-    return format.ToLowerInvariant() switch
-    {
-        "ics" => Results.File(await calendarExporter.ExportAsync(meeting, slot), "text/calendar", $"{shortCode}.ics"),
-        "json" => Results.Json(new { meeting.Title, meeting.Description, meeting.OrganizerName, slot.StartTime, slot.EndTime }),
-        "csv" => Results.File(System.Text.Encoding.UTF8.GetBytes($"Title,Organizer,StartUtc,EndUtc\r\n\"{meeting.Title.Replace("\"", "\"\"")}\",\"{meeting.OrganizerName.Replace("\"", "\"\"")}\",{slot.StartTime.UtcDateTime:O},{slot.EndTime.UtcDateTime:O}\r\n"), "text/csv", $"{shortCode}.csv"),
-        _ => Results.BadRequest("Поддерживаются форматы ics, csv и json.")
-    };
+    await next(context);
 });
 
-    return Results.Redirect($"/manage/{Uri.EscapeDataString(shortCode)}");
+app.UseAntiforgery();
+
+var recurringJobManager = app.Services.GetRequiredService<IRecurringJobManager>();
+recurringJobManager.AddOrUpdate<MeetingRetentionJob>(
+    "meeting-retention",
+    job => job.ExecuteAsync(CancellationToken.None),
+    Cron.Daily(3));
+
+app.MapGet("/export/{shortCode}/{format}", async (
+    string shortCode,
+    string format,
+    IMeetingService meetingService,
+    ICalendarExporter calendarExporter,
+    CancellationToken cancellationToken) =>
+{
+    var access = await meetingService.GetForParticipantAsync(shortCode, null, cancellationToken);
+    var meeting = access?.Meeting;
+    if (meeting?.Status != MeetingStatus.Closed || meeting.SelectedStartTime is null || meeting.SelectedEndTime is null)
+        return Results.NotFound();
+
+    return format.ToLowerInvariant() switch
+    {
+        "ics" => Results.File(await calendarExporter.ExportAsync(meeting, cancellationToken), "text/calendar", $"{shortCode}.ics"),
+        "json" => Results.Json(new
+        {
+            meeting.Title,
+            meeting.Description,
+            meeting.OrganizerName,
+            StartTime = meeting.SelectedStartTime,
+            EndTime = meeting.SelectedEndTime
+        }),
+        "csv" => Results.File(
+            System.Text.Encoding.UTF8.GetBytes(
+                $"Title,Organizer,StartUtc,EndUtc\r\n\"{Csv(meeting.Title)}\",\"{Csv(meeting.OrganizerName)}\",{meeting.SelectedStartTime.Value.UtcDateTime:O},{meeting.SelectedEndTime.Value.UtcDateTime:O}\r\n"),
+            "text/csv",
+            $"{shortCode}.csv"),
+        _ => Results.BadRequest("Поддерживаются форматы ics, csv и json.")
+    };
 });
 
 app.MapGet("/participant-access/{shortCode}", async (
     HttpContext httpContext,
     string shortCode,
     string token,
-    IMeetingService meetingService) =>
+    IMeetingService meetingService,
+    CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(token))
-    {
         return Results.BadRequest("Токен участника не указан.");
-    }
 
-    var access = await meetingService.GetForParticipantAsync(shortCode, token);
+    var access = await meetingService.GetForParticipantAsync(shortCode, token, cancellationToken);
     if (access?.Participant is null)
-    {
         return Results.BadRequest("Ссылка участника недействительна.");
-    }
 
-    httpContext.Response.Cookies.Append($"timemeet-participant-{shortCode}", token, new CookieOptions
-    {
-        HttpOnly = true,
-        Secure = !app.Environment.IsDevelopment(),
-        SameSite = SameSiteMode.Lax,
-        MaxAge = TimeSpan.FromDays(90),
-        IsEssential = true
-    });
+    httpContext.Response.Cookies.Append(
+        $"timemeet-participant-{shortCode}",
+        token,
+        CreateParticipantCookieOptions(app.Environment.IsDevelopment()));
 
     return Results.Redirect($"/m/{Uri.EscapeDataString(shortCode)}");
 });
@@ -101,3 +134,38 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+static string? GetManageShortCode(PathString path)
+{
+    var value = path.Value?.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+    return value is { Length: 2 } && value[0].Equals("manage", StringComparison.OrdinalIgnoreCase)
+        ? value[1]
+        : null;
+}
+
+static bool SecureEquals(string left, string right)
+{
+    var leftBytes = System.Text.Encoding.UTF8.GetBytes(left);
+    var rightBytes = System.Text.Encoding.UTF8.GetBytes(right);
+    return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+}
+
+static CookieOptions CreateOwnerCookieOptions(bool isDevelopment) => new()
+{
+    HttpOnly = true,
+    Secure = !isDevelopment,
+    SameSite = SameSiteMode.Lax,
+    MaxAge = TimeSpan.FromDays(90),
+    IsEssential = true
+};
+
+static CookieOptions CreateParticipantCookieOptions(bool isDevelopment) => new()
+{
+    HttpOnly = true,
+    Secure = !isDevelopment,
+    SameSite = SameSiteMode.Lax,
+    MaxAge = TimeSpan.FromDays(90),
+    IsEssential = true
+};
+
+static string Csv(string value) => value.Replace("\"", "\"\"");

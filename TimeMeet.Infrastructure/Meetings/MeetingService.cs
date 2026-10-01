@@ -14,26 +14,45 @@ public sealed class MeetingService(TimeMeetDbContext dbContext) : IMeetingServic
     public async Task<CreatedMeeting> CreateAsync(CreateMeetingRequest request, CancellationToken cancellationToken = default)
     {
         Validate(request);
-        var timeZone = TimeZoneInfo.FindSystemTimeZoneById(request.TimeZone);
+        var timeZone = FindTimeZone(request.TimeZone);
         var now = DateTimeOffset.UtcNow;
         var meeting = new Meeting
         {
-            Id = Guid.NewGuid(), ShortCode = await CreateUniqueShortCodeAsync(cancellationToken), OwnerToken = CreateToken(32),
-            Title = request.Title.Trim(), Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
-            OrganizerName = request.OrganizerName.Trim(), TimeZone = request.TimeZone, Status = MeetingStatus.Active,
-            Phase = MeetingPhase.AvailabilityCollection, Deadline = request.Deadline?.ToUniversalTime(),
-            AllowAnonymous = true, AllowRegistration = false, GridStartDate = request.GridStartDate, GridEndDate = request.GridEndDate,
-            GridFrom = request.GridFrom, GridTo = request.GridTo, GridStepMinutes = request.GridStepMinutes, CreatedAt = now
+            Id = Guid.NewGuid(),
+            ShortCode = await CreateUniqueShortCodeAsync(cancellationToken),
+            OwnerToken = CreateToken(32),
+            Title = request.Title.Trim(),
+            Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
+            OrganizerName = request.OrganizerName.Trim(),
+            TimeZone = request.TimeZone,
+            RetentionMode = request.RetentionMode,
+            Status = MeetingStatus.Active,
+            AllowAnonymous = true,
+            AllowRegistration = false,
+            GridStartDate = request.GridStartDate,
+            GridEndDate = request.GridEndDate,
+            GridStepMinutes = request.GridStepMinutes,
+            CreatedAt = now
         };
 
         for (var date = request.GridStartDate; date <= request.GridEndDate; date = date.AddDays(1))
         {
-            for (var time = request.GridFrom; time < request.GridTo; time = time.AddMinutes(request.GridStepMinutes))
+            var localStart = DateTime.SpecifyKind(date.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+            var localEnd = DateTime.SpecifyKind(date.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+            var utcStart = TimeZoneInfo.ConvertTimeToUtc(localStart, timeZone);
+            var utcEnd = TimeZoneInfo.ConvertTimeToUtc(localEnd, timeZone);
+
+            for (var start = utcStart; start < utcEnd; start = start.AddMinutes(request.GridStepMinutes))
             {
-                var localStart = DateTime.SpecifyKind(date.ToDateTime(time), DateTimeKind.Unspecified);
-                var localEnd = DateTime.SpecifyKind(date.ToDateTime(time.AddMinutes(request.GridStepMinutes)), DateTimeKind.Unspecified);
-                if (localEnd > date.ToDateTime(request.GridTo)) break;
-                meeting.GridCells.Add(new GridCell { Id = Guid.NewGuid(), MeetingId = meeting.Id, StartTime = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localStart, timeZone)), EndTime = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localEnd, timeZone)) });
+                var end = start.AddMinutes(request.GridStepMinutes);
+                if (end > utcEnd) break;
+                meeting.GridCells.Add(new GridCell
+                {
+                    Id = Guid.NewGuid(),
+                    MeetingId = meeting.Id,
+                    StartTime = new DateTimeOffset(start),
+                    EndTime = new DateTimeOffset(end)
+                });
             }
         }
 
@@ -43,27 +62,52 @@ public sealed class MeetingService(TimeMeetDbContext dbContext) : IMeetingServic
     }
 
     public Task<Meeting?> GetForOwnerAsync(string shortCode, string ownerToken, CancellationToken cancellationToken = default) =>
-        dbContext.Meetings.Include(x => x.GridCells).ThenInclude(x => x.Availabilities).Include(x => x.TimeSlots).ThenInclude(x => x.Availabilities)
-            .Include(x => x.Participants).SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.OwnerToken == ownerToken, cancellationToken);
+        dbContext.Meetings
+            .Include(x => x.GridCells).ThenInclude(x => x.Availabilities).ThenInclude(x => x.Participant)
+            .Include(x => x.Participants).ThenInclude(x => x.Availabilities)
+            .SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.OwnerToken == ownerToken, cancellationToken);
 
     public async Task<ParticipantMeeting?> GetForParticipantAsync(string shortCode, string? participantToken, CancellationToken cancellationToken = default)
     {
-        var meeting = await dbContext.Meetings.Include(x => x.GridCells.OrderBy(x => x.StartTime)).Include(x => x.TimeSlots.OrderBy(x => x.StartTime))
-            .Include(x => x.Participants).ThenInclude(x => x.Availabilities).SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken);
+        var meeting = await dbContext.Meetings
+            .Include(x => x.GridCells.OrderBy(x => x.StartTime))
+            .Include(x => x.Participants).ThenInclude(x => x.Availabilities)
+            .SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken);
+
+        if (meeting is null)
+        {
+            meeting = await dbContext.Meetings
+                .IgnoreQueryFilters()
+                .Include(x => x.Participants)
+                .SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.Status == MeetingStatus.Deleted, cancellationToken);
+        }
+
         if (meeting is null) return null;
-        var participant = string.IsNullOrWhiteSpace(participantToken) ? null : meeting.Participants.SingleOrDefault(x => x.ParticipantToken == participantToken);
+
+        var participant = string.IsNullOrWhiteSpace(participantToken)
+            ? null
+            : meeting.Participants.SingleOrDefault(x => x.ParticipantToken == participantToken);
         return new ParticipantMeeting(meeting, participant);
     }
 
-    public async Task<CreatedParticipant> CreateParticipantAsync(string shortCode, string displayName, string timeZone, CancellationToken cancellationToken = default)
+    public async Task<CreatedParticipant> CreateParticipantAsync(string shortCode, string displayName, string timeZone, string? ownerToken = null, CancellationToken cancellationToken = default)
     {
-        var meeting = await dbContext.Meetings.SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken) ?? throw new ArgumentException("Встреча не найдена.", nameof(shortCode));
-        ValidateVotingIsOpen(meeting);
-        if (string.IsNullOrWhiteSpace(displayName) || displayName.Trim().Length > 100) throw new ArgumentException("Укажите имя длиной до 100 символов.", nameof(displayName));
+        var meeting = await dbContext.Meetings.SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken)
+            ?? throw new ArgumentException("Встреча не найдена.", nameof(shortCode));
+        EnsureVotingOpen(meeting);
+        ValidateDisplayName(displayName);
         ValidateTimeZone(timeZone);
-        if (await dbContext.Participants.CountAsync(x => x.MeetingId == meeting.Id, cancellationToken) >= 100) throw new InvalidOperationException("Достигнут лимит участников встречи.");
+
+        var participantCount = await dbContext.Participants.CountAsync(x => x.MeetingId == meeting.Id, cancellationToken);
+        if (participantCount >= 100) throw new InvalidOperationException("Достигнут лимит участников встречи.");
+
         var now = DateTimeOffset.UtcNow;
-        var participant = new Participant { Id = Guid.NewGuid(), MeetingId = meeting.Id, DisplayName = displayName.Trim(), TimeZone = timeZone, ParticipantToken = CreateToken(32), CreatedAt = now, UpdatedAt = now };
+        var participant = new Participant
+        {
+            Id = Guid.NewGuid(), MeetingId = meeting.Id, DisplayName = displayName.Trim(),
+            TimeZone = timeZone, ParticipantToken = CreateToken(32), CreatedAt = now, UpdatedAt = now,
+            IsOrganizer = !string.IsNullOrWhiteSpace(ownerToken) && SecureEquals(ownerToken, meeting.OwnerToken)
+        };
         dbContext.Participants.Add(participant);
         await dbContext.SaveChangesAsync(cancellationToken);
         return new CreatedParticipant(participant, participant.ParticipantToken);
@@ -71,58 +115,166 @@ public sealed class MeetingService(TimeMeetDbContext dbContext) : IMeetingServic
 
     public async Task SaveAvailabilityAsync(string shortCode, string participantToken, IReadOnlyCollection<AvailabilitySelection> selections, CancellationToken cancellationToken = default)
     {
-        var meeting = await dbContext.Meetings.Include(x => x.GridCells).Include(x => x.TimeSlots).SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken) ?? throw new ArgumentException("Встреча не найдена.", nameof(shortCode));
-        ValidateVotingIsOpen(meeting);
-        var participant = await dbContext.Participants.Include(x => x.Availabilities).SingleOrDefaultAsync(x => x.MeetingId == meeting.Id && x.ParticipantToken == participantToken, cancellationToken) ?? throw new UnauthorizedAccessException("Участник не найден.");
-        var targetIds = meeting.Phase == MeetingPhase.AvailabilityCollection ? meeting.GridCells.Select(x => x.Id).ToHashSet() : meeting.TimeSlots.Select(x => x.Id).ToHashSet();
-        if (selections.Any(x => !targetIds.Contains(x.TargetId)) || selections.GroupBy(x => x.TargetId).Any(x => x.Count() > 1) || selections.Any(x => !Enum.IsDefined(x.Status))) throw new ArgumentException("Некорректные отметки доступности.", nameof(selections));
-        var old = participant.Availabilities.Where(x => meeting.Phase == MeetingPhase.AvailabilityCollection ? x.GridCellId is not null : x.TimeSlotId is not null);
-        dbContext.Availabilities.RemoveRange(old);
-        dbContext.Availabilities.AddRange(selections.Select(x => new Availability { Id = Guid.NewGuid(), ParticipantId = participant.Id, GridCellId = meeting.Phase == MeetingPhase.AvailabilityCollection ? x.TargetId : null, TimeSlotId = meeting.Phase == MeetingPhase.FinalSlotSelection ? x.TargetId : null, Status = x.Status, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow }));
+        var meeting = await dbContext.Meetings.Include(x => x.GridCells)
+            .SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken)
+            ?? throw new ArgumentException("Встреча не найдена.", nameof(shortCode));
+        EnsureVotingOpen(meeting);
+        var participant = await dbContext.Participants.Include(x => x.Availabilities)
+            .SingleOrDefaultAsync(x => x.MeetingId == meeting.Id && x.ParticipantToken == participantToken, cancellationToken)
+            ?? throw new UnauthorizedAccessException("Участник не найден.");
+
+        var cellIds = meeting.GridCells.Select(x => x.Id).ToHashSet();
+        if (selections.Count > cellIds.Count || selections.Any(x => !cellIds.Contains(x.GridCellId)) ||
+            selections.GroupBy(x => x.GridCellId).Any(x => x.Count() > 1) || selections.Any(x => !Enum.IsDefined(x.Status)))
+            throw new ArgumentException("Некорректные отметки доступности.", nameof(selections));
+
+        dbContext.Availabilities.RemoveRange(participant.Availabilities);
+        var now = DateTimeOffset.UtcNow;
+        dbContext.Availabilities.AddRange(selections.Select(x => new Availability
+        {
+            Id = Guid.NewGuid(), ParticipantId = participant.Id, GridCellId = x.GridCellId,
+            Status = x.Status, CreatedAt = now, UpdatedAt = now
+        }));
+        participant.HasNoSuitableTime = false;
+        participant.UpdatedAt = now;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<string> RegenerateOwnerTokenAsync(string shortCode, string ownerToken, CancellationToken cancellationToken = default)
+    {
+        var meeting = await dbContext.Meetings.SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.OwnerToken == ownerToken, cancellationToken)
+            ?? throw new UnauthorizedAccessException("Ссылка управления недействительна.");
+        if (meeting.Status == MeetingStatus.Deleted) throw new InvalidOperationException("Встреча удалена.");
+
+        meeting.OwnerToken = CreateToken(32);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return meeting.OwnerToken;
+    }
+
+    public async Task DeleteAsync(string shortCode, string ownerToken, CancellationToken cancellationToken = default)
+    {
+        var meeting = await dbContext.Meetings
+            .Include(x => x.GridCells).ThenInclude(x => x.Availabilities)
+            .Include(x => x.Participants).ThenInclude(x => x.Availabilities)
+            .Include(x => x.Invitations)
+            .SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.OwnerToken == ownerToken, cancellationToken)
+            ?? throw new UnauthorizedAccessException("Ссылка управления недействительна.");
+
+        if (meeting.Status == MeetingStatus.Deleted) return;
+        dbContext.Availabilities.RemoveRange(meeting.GridCells.SelectMany(x => x.Availabilities).Concat(meeting.Participants.SelectMany(x => x.Availabilities)));
+        dbContext.Invitations.RemoveRange(meeting.Invitations);
+        dbContext.GridCells.RemoveRange(meeting.GridCells);
+        dbContext.Participants.RemoveRange(meeting.Participants);
+        meeting.Status = MeetingStatus.Deleted;
+        meeting.DeletedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SetNoSuitableTimeAsync(string shortCode, string participantToken, bool value, CancellationToken cancellationToken = default)
+    {
+        var meeting = await dbContext.Meetings.SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken)
+            ?? throw new ArgumentException("Встреча не найдена.", nameof(shortCode));
+        EnsureVotingOpen(meeting);
+        var participant = await dbContext.Participants.Include(x => x.Availabilities)
+            .SingleOrDefaultAsync(x => x.MeetingId == meeting.Id && x.ParticipantToken == participantToken, cancellationToken)
+            ?? throw new UnauthorizedAccessException("Участник не найден.");
+        participant.HasNoSuitableTime = value;
         participant.UpdatedAt = DateTimeOffset.UtcNow;
+        if (value) dbContext.Availabilities.RemoveRange(participant.Availabilities);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyCollection<GridCellAnalysis>> AnalyzeAvailabilityAsync(string shortCode, string ownerToken, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<GridCellAnalysis>> AnalyzeAvailabilityAsync(string shortCode, CancellationToken cancellationToken = default)
     {
-        var meeting = await dbContext.Meetings.Include(x => x.GridCells).ThenInclude(x => x.Availabilities).ThenInclude(x => x.Participant).SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.OwnerToken == ownerToken, cancellationToken) ?? throw new UnauthorizedAccessException("Доступ к встрече запрещён.");
-        return meeting.GridCells.OrderBy(x => x.StartTime).Select(cell => { var answers = cell.Availabilities; var available = answers.Where(x => x.Status == AvailabilityStatus.Available).ToArray(); var needed = answers.Count(x => x.Status == AvailabilityStatus.IfNeeded); var unavailable = answers.Count(x => x.Status == AvailabilityStatus.Unavailable); return new GridCellAnalysis(cell, available.Length, needed, unavailable, available.Length * 100 + needed * 20 - unavailable * 100, available.Select(x => x.Participant.DisplayName).ToArray(), answers.Where(x => x.Status == AvailabilityStatus.Unavailable).Select(x => x.Participant.DisplayName).ToArray()); }).OrderByDescending(x => x.Score).ThenBy(x => x.Cell.StartTime).ToArray();
+        var meeting = await dbContext.Meetings
+            .Include(x => x.GridCells).ThenInclude(x => x.Availabilities).ThenInclude(x => x.Participant)
+            .Include(x => x.Participants).ThenInclude(x => x.Availabilities)
+            .SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken)
+            ?? throw new ArgumentException("Встреча не найдена.", nameof(shortCode));
+
+        var voters = meeting.Participants.Where(x => x.HasNoSuitableTime || x.Availabilities.Count > 0).ToArray();
+        return meeting.GridCells.Select(cell =>
+        {
+            var available = cell.Availabilities.Where(x => x.Status == AvailabilityStatus.Available).Select(x => x.Participant.DisplayName).ToArray();
+            var ifNeeded = cell.Availabilities.Where(x => x.Status == AvailabilityStatus.IfNeeded).Select(x => x.Participant.DisplayName).ToArray();
+            var cannot = voters.Where(x => !cell.Availabilities.Any(a => a.ParticipantId == x.Id)).Select(x => x.DisplayName).ToArray();
+            var score = available.Length * 100 + ifNeeded.Length * 20 - cannot.Length * 100;
+            return new GridCellAnalysis(cell, available.Length, ifNeeded.Length, cannot.Length, score, available, ifNeeded, cannot);
+        }).OrderByDescending(x => x.Score).ThenByDescending(x => x.AvailableCount).ThenBy(x => x.CannotCount).ThenByDescending(x => x.IfNeededCount).ThenBy(x => x.Cell.StartTime).ToArray();
     }
 
-    public async Task StartFinalPhaseAsync(string shortCode, string ownerToken, FinalPhaseRequest request, CancellationToken cancellationToken = default)
+    public async Task CloseAsync(string shortCode, string ownerToken, DateTimeOffset? selectedStartTime, DateTimeOffset? selectedEndTime, CancellationToken cancellationToken = default)
     {
-        var meeting = await dbContext.Meetings.Include(x => x.GridCells).SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.OwnerToken == ownerToken, cancellationToken) ?? throw new UnauthorizedAccessException("Доступ к встрече запрещён.");
-        if (meeting.Phase != MeetingPhase.AvailabilityCollection || meeting.Status != MeetingStatus.Active) throw new InvalidOperationException("Переход в финальную фазу недоступен.");
-        if (request.GridCellIds.Count is < 2 or > 5 || request.GridCellIds.Distinct().Count() != request.GridCellIds.Count) throw new ArgumentException("Выберите от 2 до 5 разных интервалов.", nameof(request));
-        var cells = meeting.GridCells.Where(x => request.GridCellIds.Contains(x.Id)).ToArray();
-        if (cells.Length != request.GridCellIds.Count) throw new ArgumentException("Выбрана ячейка другой встречи.", nameof(request));
-        if (request.FinalDeadline is not null && request.FinalDeadline <= DateTimeOffset.UtcNow) throw new ArgumentException("Финальный дедлайн должен быть в будущем.", nameof(request));
-        foreach (var cell in cells) meeting.TimeSlots.Add(new TimeSlot { Id = Guid.NewGuid(), MeetingId = meeting.Id, SourceGridCellId = cell.Id, StartTime = cell.StartTime, EndTime = cell.EndTime });
-        meeting.Phase = MeetingPhase.FinalSlotSelection; meeting.FinalDeadline = request.FinalDeadline?.ToUniversalTime();
-        await dbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task CloseAsync(string shortCode, string ownerToken, Guid selectedTimeSlotId, CancellationToken cancellationToken = default)
-    {
-        var meeting = await dbContext.Meetings.Include(x => x.TimeSlots).SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.OwnerToken == ownerToken, cancellationToken) ?? throw new UnauthorizedAccessException("Доступ к встрече запрещён.");
-        if (meeting.Status != MeetingStatus.Active || meeting.Phase != MeetingPhase.FinalSlotSelection || meeting.TimeSlots.All(x => x.Id != selectedTimeSlotId)) throw new InvalidOperationException("Нельзя закрыть встречу без корректного финального слота.");
-        meeting.SelectedTimeSlotId = selectedTimeSlotId; meeting.Status = MeetingStatus.Closed; meeting.ClosedAt = DateTimeOffset.UtcNow;
+        var meeting = await dbContext.Meetings.SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.OwnerToken == ownerToken, cancellationToken)
+            ?? throw new UnauthorizedAccessException("Ссылка управления недействительна.");
+        if (meeting.Status != MeetingStatus.Active) throw new InvalidOperationException("Встреча уже закрыта.");
+        if ((selectedStartTime is null) != (selectedEndTime is null) || selectedStartTime >= selectedEndTime)
+            throw new ArgumentException("Укажите корректное итоговое окно.");
+        meeting.SelectedStartTime = selectedStartTime?.ToUniversalTime();
+        meeting.SelectedEndTime = selectedEndTime?.ToUniversalTime();
+        meeting.Status = MeetingStatus.Closed;
+        meeting.ClosedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static void Validate(CreateMeetingRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Trim().Length > 200) throw new ArgumentException("Название встречи обязательно и не должно превышать 200 символов.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.OrganizerName) || request.OrganizerName.Trim().Length > 100) throw new ArgumentException("Укажите имя организатора длиной до 100 символов.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Trim().Length > 100) throw new ArgumentException("Название встречи обязательно и должно содержать не более 100 символов.");
+        if (string.IsNullOrWhiteSpace(request.Description) is false && request.Description!.Length > 1000) throw new ArgumentException("Описание должно содержать не более 1000 символов.");
+        ValidateDisplayName(request.OrganizerName);
         ValidateTimeZone(request.TimeZone);
-        if (request.GridStepMinutes is not (30 or 60)) throw new ArgumentException("Шаг сетки должен быть 30 или 60 минут.", nameof(request));
-        if (request.GridEndDate < request.GridStartDate || request.GridTo <= request.GridFrom) throw new ArgumentException("Диапазон сетки указан некорректно.", nameof(request));
-        if (request.Deadline is not null && request.Deadline <= DateTimeOffset.UtcNow) throw new ArgumentException("Дедлайн должен быть в будущем.", nameof(request));
+        if (request.GridStartDate < DateOnly.FromDateTime(DateTime.UtcNow)) throw new ArgumentException("Дата начала не может быть в прошлом.");
+        if (request.GridStartDate > request.GridEndDate) throw new ArgumentException("Дата начала не может быть позже даты окончания.");
+        if (request.GridStepMinutes is not (15 or 30 or 60)) throw new ArgumentException("Шаг сетки должен быть 15, 30 или 60 минут.");
+        var days = request.GridEndDate.DayNumber - request.GridStartDate.DayNumber + 1;
+        if (days * (24 * 60 / request.GridStepMinutes) > 1500) throw new ArgumentException("Сетка не должна содержать более 1500 ячеек.");
     }
 
-    private static void ValidateTimeZone(string timeZone) { if (string.IsNullOrWhiteSpace(timeZone) || !TimeZoneInfo.TryFindSystemTimeZoneById(timeZone, out _)) throw new ArgumentException("Укажите корректный часовой пояс.", nameof(timeZone)); }
-    private static void ValidateVotingIsOpen(Meeting meeting) { if (meeting.Status != MeetingStatus.Active || (meeting.Phase == MeetingPhase.AvailabilityCollection ? meeting.Deadline : meeting.FinalDeadline) <= DateTimeOffset.UtcNow) throw new InvalidOperationException("Голосование закрыто или срок голосования истёк."); }
-    private async Task<string> CreateUniqueShortCodeAsync(CancellationToken ct) { for (var i = 0; i < 10; i++) { var code = CreateBase62Token(8); if (!await dbContext.Meetings.AnyAsync(x => x.ShortCode == code, ct)) return code; } throw new InvalidOperationException("Не удалось сгенерировать код встречи."); }
-    private static string CreateToken(int byteCount) { Span<byte> bytes = stackalloc byte[byteCount]; RandomNumberGenerator.Fill(bytes); return Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('='); }
-    private static string CreateBase62Token(int length) { Span<byte> bytes = stackalloc byte[length]; RandomNumberGenerator.Fill(bytes); return string.Create(length, bytes.ToArray(), static (result, source) => { for (var i = 0; i < result.Length; i++) result[i] = Base62[source[i] % Base62.Length]; }); }
+    private static void ValidateDisplayName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > 50) throw new ArgumentException("Имя должно содержать от 1 до 50 символов.");
+    }
+
+    private static TimeZoneInfo FindTimeZone(string id)
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
+        catch (TimeZoneNotFoundException) { throw new ArgumentException("Указан неизвестный часовой пояс.", nameof(id)); }
+        catch (InvalidTimeZoneException) { throw new ArgumentException("Указан некорректный часовой пояс.", nameof(id)); }
+    }
+
+    private static void ValidateTimeZone(string id) => _ = FindTimeZone(id);
+    private static void EnsureVotingOpen(Meeting meeting) { if (meeting.Status != MeetingStatus.Active) throw new InvalidOperationException("Голосование закрыто."); }
+
+    private static bool SecureEquals(string left, string right)
+    {
+        var leftBytes = System.Text.Encoding.UTF8.GetBytes(left);
+        var rightBytes = System.Text.Encoding.UTF8.GetBytes(right);
+        return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+    }
+
+    private async Task<string> CreateUniqueShortCodeAsync(CancellationToken ct)
+    {
+        for (var i = 0; i < 10; i++)
+        {
+            var code = CreateBase62Token(8);
+            if (!await dbContext.Meetings.AnyAsync(x => x.ShortCode == code, ct)) return code;
+        }
+        throw new InvalidOperationException("Не удалось сгенерировать код встречи.");
+    }
+
+    private static string CreateBase62Token(int length)
+    {
+        Span<byte> bytes = stackalloc byte[length];
+        RandomNumberGenerator.Fill(bytes);
+        return string.Create(length, bytes.ToArray(), (result, source) =>
+        {
+            for (var i = 0; i < result.Length; i++) result[i] = Base62[source[i] % Base62.Length];
+        });
+    }
+
+    private static string CreateToken(int byteCount)
+    {
+        var bytes = RandomNumberGenerator.GetBytes(byteCount);
+        return Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+    }
 }
