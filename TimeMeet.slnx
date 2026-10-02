@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/docs/">
+    <File Path="docs/TECHNICAL_SPECIFICATION.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="TimeMeet.Application/TimeMeet.Application.csproj" Id="c2c585ad-3c81-4cae-86ca-bb15d22185aa" />
     <Project Path="TimeMeet.Domain/TimeMeet.Domain.csproj" />
