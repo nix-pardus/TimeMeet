@@ -10,8 +10,8 @@
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudPaper Class="pa-6" Elevation="2">
         <MudText Typo="Typo.h4" GutterBottom="true">Создать встречу</MudText>
-        <MudText Color="Color.Secondary" Class="mb-5">
-            Сначала участники отметят доступность в свободной сетке, затем вы выберете варианты для финального голосования.
+            <MudText Color="Color.Secondary" Class="mb-5">
+                Участники отметят доступность в свободной сетке полных суток, а затем вы выберете итоговое время.
         </MudText>
 
         @if (!string.IsNullOrWhiteSpace(errorMessage))
@@ -30,17 +30,25 @@
             <MudGrid>
                 <MudItem xs="12" sm="6"><MudDatePicker @bind-Date="model.StartDate" Label="Дата начала" Required="true" /></MudItem>
                 <MudItem xs="12" sm="6"><MudDatePicker @bind-Date="model.EndDate" Label="Дата окончания" Required="true" /></MudItem>
-                <MudItem xs="12" sm="6"><MudTextField @bind-Value="model.From" Label="Время начала дня" type="time" Required="true" /></MudItem>
-                <MudItem xs="12" sm="6"><MudTextField @bind-Value="model.To" Label="Время окончания дня" type="time" Required="true" /></MudItem>
                 <MudItem xs="12">
                     <MudSelect @bind-Value="model.Step" Label="Шаг сетки" Required="true">
+                        <MudSelectItem Value="15">15 минут</MudSelectItem>
                         <MudSelectItem Value="30">30 минут</MudSelectItem>
                         <MudSelectItem Value="60">60 минут</MudSelectItem>
                     </MudSelect>
                 </MudItem>
+                <MudItem xs="12">
+                    <MudRadioGroup T="RetentionMode" @bind-Value="model.RetentionMode">
+                        <MudText Typo="Typo.subtitle2">Хранение встречи</MudText>
+                        <MudRadio T="RetentionMode" Value="RetentionMode.KeepForever">
+                            Хранить историю встречи
+                        </MudRadio>
+                        <MudRadio T="RetentionMode" Value="RetentionMode.DeleteAfterLastDay">
+                            Удалить через день после окончания
+                        </MudRadio>
+                    </MudRadioGroup>
+                </MudItem>
             </MudGrid>
-
-            <MudTextField @bind-Value="model.Deadline" Label="Дедлайн первой фазы (необязательно)" type="datetime-local" Class="mt-4" />
 
             <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" Class="mt-4" Disabled="isSaving">
                 @(isSaving ? "Создание…" : "Создать встречу")
@@ -60,8 +68,8 @@
         isSaving = true;
         try
         {
-            if (model.StartDate is null || model.EndDate is null || !TimeSpan.TryParse(model.From, out var from) || !TimeSpan.TryParse(model.To, out var to))
-                throw new ArgumentException("Укажите корректный диапазон дат и времени.");
+            if (model.StartDate is null || model.EndDate is null)
+                throw new ArgumentException("Укажите корректный диапазон дат.");
 
             var result = await MeetingService.CreateAsync(new CreateMeetingRequest
             {
@@ -71,13 +79,11 @@
                 TimeZone = model.TimeZone,
                 GridStartDate = DateOnly.FromDateTime(model.StartDate.Value),
                 GridEndDate = DateOnly.FromDateTime(model.EndDate.Value),
-                GridFrom = TimeOnly.FromTimeSpan(from),
-                GridTo = TimeOnly.FromTimeSpan(to),
                 GridStepMinutes = model.Step,
-                 Deadline = ParseDeadline(model.Deadline, model.TimeZone),
+                RetentionMode = model.RetentionMode
             });
 
-            Navigation.NavigateTo($"/manage-access/{result.Meeting.ShortCode}?token={Uri.EscapeDataString(result.OwnerToken)}", forceLoad: true);
+            Navigation.NavigateTo($"/manage-access/{result.Meeting.ShortCode}?token={Uri.EscapeDataString(result.OwnerToken)}&participantToken={Uri.EscapeDataString(result.OrganizerParticipantToken)}", forceLoad: true);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or TimeZoneNotFoundException)
         {
@@ -89,22 +95,6 @@
         }
     }
 
-    private static DateTimeOffset? ParseDeadline(string value, string timeZoneId)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        if (!DateTime.TryParse(value, out var local))
-        {
-            throw new ArgumentException("Укажите корректный дедлайн.");
-        }
-
-        var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
-        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), zone));
-    }
-
     private sealed class CreateMeetingModel
     {
         [Required, StringLength(200)] public string Title { get; set; } = string.Empty;
@@ -113,9 +103,7 @@
         [Required] public string TimeZone { get; set; } = "Europe/Moscow";
         public DateTime? StartDate { get; set; } = DateTime.Today.AddDays(1);
         public DateTime? EndDate { get; set; } = DateTime.Today.AddDays(7);
-        public string From { get; set; } = "09:00";
-        public string To { get; set; } = "21:00";
         public int Step { get; set; } = 30;
-        public string Deadline { get; set; } = string.Empty;
+        public RetentionMode RetentionMode { get; set; } = RetentionMode.KeepForever;
     }
 }
