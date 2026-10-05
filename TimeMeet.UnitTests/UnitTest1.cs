@@ -15,18 +15,15 @@ public sealed class MeetingWorkflowTests
             TimeZone = "Europe/Moscow",
             GridStartDate = new DateOnly(2026, 10, 1),
             GridEndDate = new DateOnly(2026, 10, 2),
-            GridFrom = new TimeOnly(9, 0),
-            GridTo = new TimeOnly(18, 0),
             GridStepMinutes = 30
         };
 
-        Assert.True(request.GridStepMinutes is 30 or 60);
+        Assert.True(request.GridStepMinutes is 15 or 30 or 60);
         Assert.True(request.GridEndDate >= request.GridStartDate);
-        Assert.True(request.GridTo > request.GridFrom);
     }
 
     [Fact]
-    public void AvailabilitySelection_UsesTargetIdForCurrentPhase()
+    public void AvailabilitySelection_UsesGridCellTargetId()
     {
         var targetId = Guid.NewGuid();
         var selection = new AvailabilitySelection(targetId, AvailabilityStatus.IfNeeded);
@@ -36,9 +33,18 @@ public sealed class MeetingWorkflowTests
     }
 
     [Fact]
-    public void MeetingPhases_AreOrderedAsWorkflow()
+    public void AvailabilityStatus_ContainsOnlySupportedValues()
     {
-        Assert.Equal(0, (int)MeetingPhase.AvailabilityCollection);
-        Assert.Equal(1, (int)MeetingPhase.FinalSlotSelection);
+        Assert.True(Enum.IsDefined(typeof(AvailabilityStatus), AvailabilityStatus.Available));
+        Assert.True(Enum.IsDefined(typeof(AvailabilityStatus), AvailabilityStatus.IfNeeded));
+        Assert.Equal(2, Enum.GetValues<AvailabilityStatus>().Length);
+    }
+
+    [Fact]
+    public void OrganizerManagementPath_UsesMeetingCode()
+    {
+        var path = MeetingNavigation.GetManagementPath("abc 123");
+
+        Assert.Equal("/manage/abc%20123", path);
     }
 }

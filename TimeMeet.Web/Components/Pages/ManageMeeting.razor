@@ -7,39 +7,254 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
 
-<PageTitle>РџР°РЅРµР»СЊ РІСЃС‚СЂРµС‡Рё вЂ” TimeMeet</PageTitle>
+<PageTitle>Управление встречей в TimeMeet</PageTitle>
+
 <MudContainer MaxWidth="MaxWidth.Large">
-@if (isLoading) { <MudSkeleton Height="240px" /> }
-else if (!string.IsNullOrWhiteSpace(errorMessage)) { <MudAlert Severity="Severity.Error">@errorMessage</MudAlert> }
-else if (meeting is not null) {
-    <MudText Typo="Typo.h4">@meeting.Title</MudText>
-    <MudText Color="Color.Secondary" Class="mb-4">@GetStatusText(meeting.Status) В· @(meeting.Phase == MeetingPhase.AvailabilityCollection ? "РЎР±РѕСЂ РґРѕСЃС‚СѓРїРЅРѕСЃС‚Рё" : "Р¤РёРЅР°Р»СЊРЅРѕРµ РіРѕР»РѕСЃРѕРІР°РЅРёРµ")</MudText>
-    <MudPaper Class="pa-4 mb-4"><MudText Typo="Typo.h6">РЎСЃС‹Р»РєР° РґР»СЏ СѓС‡Р°СЃС‚РЅРёРєРѕРІ</MudText><MudTextField Value="@ParticipantUrl" ReadOnly="true" /><MudText Typo="Typo.caption">РЈС‡Р°СЃС‚РЅРёРєРѕРІ: @meeting.Participants.Count В· Р§Р°СЃРѕРІРѕР№ РїРѕСЏСЃ: @meeting.TimeZone</MudText></MudPaper>
-    @if (meeting.Phase == MeetingPhase.AvailabilityCollection && meeting.Status == MeetingStatus.Active) {
-        <MudPaper Class="pa-4"><MudText Typo="Typo.h6">Р›СѓС‡С€РёРµ РёРЅС‚РµСЂРІР°Р»С‹</MudText><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AnalyzeAsync" Disabled="isBusy">РќР°Р№С‚Рё РѕР±С‰РёРµ РёРЅС‚РµСЂРІР°Р»С‹</MudButton>
-        @if (analysis.Count > 0) {
-            <MudText Class="mt-3">Р’С‹Р±СЂР°РЅРѕ: @selectedCells.Count РёР· 2вЂ“5</MudText>
-            <MudTable Items="analysis" Hover="true" Dense="true" Class="mt-2"><HeaderContent><MudTh>Р’С‹Р±РѕСЂ</MudTh><MudTh>Р’СЂРµРјСЏ</MudTh><MudTh>РЎРІРѕР±РѕРґРЅС‹</MudTh><MudTh>Р•СЃР»Рё РЅСѓР¶РЅРѕ</MudTh><MudTh>РќРµ РјРѕРіСѓС‚</MudTh><MudTh>Р РµР№С‚РёРЅРі</MudTh></HeaderContent><RowTemplate><MudTd><MudCheckBox T="bool" Value="@selectedCells.Contains(context.Cell.Id)" ValueChanged="@(value => ToggleCell(context.Cell.Id, value))" /></MudTd><MudTd>@Format(context.Cell.StartTime) вЂ” @Format(context.Cell.EndTime)</MudTd><MudTd>@context.AvailableCount</MudTd><MudTd>@context.IfNeededCount</MudTd><MudTd>@context.UnavailableCount</MudTd><MudTd>@context.Score</MudTd></RowTemplate></MudTable>
-            <MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Success" OnClick="StartFinalAsync" Disabled="@(selectedCells.Count is < 2 or > 5 || isBusy)">РЎРѕР·РґР°С‚СЊ С„РёРЅР°Р»СЊРЅРѕРµ РіРѕР»РѕСЃРѕРІР°РЅРёРµ</MudButton>
-        }
+    @if (isLoading)
+    {
+        <MudSkeleton Height="240px" />
+    }
+    else if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <MudAlert Severity="Severity.Error">@errorMessage</MudAlert>
+    }
+    else if (meeting is not null)
+    {
+        <MudText Typo="Typo.h4">@meeting.Title</MudText>
+        <MudText Color="Color.Secondary" Class="mb-4">
+            @GetStatusText(meeting.Status)
+        </MudText>
+
+        <MudPaper Class="pa-4 mb-4">
+            <MudText Typo="Typo.h6">Ссылка для участников</MudText>
+            <MudTextField Value="@ParticipantUrl" ReadOnly="true" />
+            <MudText Typo="Typo.caption">
+                Участников: @meeting.Participants.Count · Часовой пояс: @meeting.TimeZone
+            </MudText>
         </MudPaper>
+
+        @if (meeting.Status == MeetingStatus.Active)
+        {
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.h6">Анализ доступности</MudText>
+
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           OnClick="AnalyzeAsync"
+                           Disabled="isBusy">
+                    Найти лучшие интервалы
+                </MudButton>
+
+                @if (analysis.Count > 0)
+                {
+                    <MudTable Items="analysis"
+                              Hover="true"
+                              Dense="true"
+                              Class="mt-2">
+                        <HeaderContent>
+                            <MudTh>Время</MudTh>
+                            <MudTh>Доступны</MudTh>
+                            <MudTh>Если нужно</MudTh>
+                            <MudTh>Не могут</MudTh>
+                            <MudTh>Оценка</MudTh>
+                            <MudTh>Действие</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>
+                                @Format(context.Cell.StartTime) — @Format(context.Cell.EndTime)
+                            </MudTd>
+                            <MudTd>@context.AvailableCount</MudTd>
+                            <MudTd>@context.IfNeededCount</MudTd>
+                            <MudTd>@context.CannotCount</MudTd>
+                            <MudTd>@context.Score</MudTd>
+                            <MudTd>
+                                <MudButton Size="Size.Small"
+                                           Color="Color.Success"
+                                           OnClick="@(() => CloseWithCellAsync(context.Cell))"
+                                           Disabled="isBusy">
+                                    Выбрать
+                                </MudButton>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+
+                <MudButton Class="mt-3"
+                           Variant="Variant.Outlined"
+                           Color="Color.Warning"
+                           OnClick="CloseWithoutSelectionAsync"
+                           Disabled="isBusy">
+                    Закрыть без выбранного времени
+                </MudButton>
+            </MudPaper>
+        }
+
+        @if (meeting.Status == MeetingStatus.Closed)
+        {
+            <MudAlert Severity="Severity.Success" Class="mt-4">
+                @(meeting.SelectedStartTime is null
+                    ? "Встреча закрыта без выбранного времени."
+                    : $"Итог: {Format(meeting.SelectedStartTime.Value)} — {Format(meeting.SelectedEndTime!.Value)}")
+            </MudAlert>
+        }
+
+        @if (meeting.Status is MeetingStatus.Active or MeetingStatus.Closed)
+        {
+            <MudPaper Class="pa-4 mt-4">
+                <MudText Typo="Typo.h6">Управление хранением</MudText>
+                <MudText Class="mb-2">
+                    Режим хранения: @GetRetentionText(meeting.RetentionMode)
+                </MudText>
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Warning"
+                           OnClick="ArchiveAsync"
+                           Disabled="isBusy">
+                    Архивировать встречу
+                </MudButton>
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           Class="ml-2"
+                           OnClick="DeleteAsync"
+                           Disabled="isBusy">
+                    Удалить встречу
+                </MudButton>
+            </MudPaper>
+        }
     }
-    @if (meeting.Phase == MeetingPhase.FinalSlotSelection) {
-        <MudPaper Class="pa-4"><MudText Typo="Typo.h6">Р¤РёРЅР°Р»СЊРЅС‹Рµ РІР°СЂРёР°РЅС‚С‹</MudText><MudTable Items="meeting.TimeSlots.OrderBy(x => x.StartTime)" Dense="true"><HeaderContent><MudTh>Р’С‹Р±РѕСЂ</MudTh><MudTh>Р’СЂРµРјСЏ</MudTh></HeaderContent><RowTemplate><MudTd><MudRadio T="Guid" Group="final-slot" Value="@context.Id" @bind-Checked="selectedSlotId" /></MudTd><MudTd>@Format(context.StartTime) вЂ” @Format(context.EndTime)</MudTd></RowTemplate></MudTable><MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Success" OnClick="CloseAsync" Disabled="@(selectedSlotId == Guid.Empty || isBusy)">Р—Р°РєСЂС‹С‚СЊ РіРѕР»РѕСЃРѕРІР°РЅРёРµ</MudButton></MudPaper>
-    }
-    @if (meeting.Status == MeetingStatus.Closed && meeting.SelectedTimeSlotId is not null) { <MudAlert Severity="Severity.Success" Class="mt-4">Р’СЃС‚СЂРµС‡Р° Р·Р°РєСЂС‹С‚Р°. РС‚РѕРіРѕРІС‹Р№ СЃР»РѕС‚ РІС‹Р±СЂР°РЅ.</MudAlert> }
-}
 </MudContainer>
 
 @code {
-    [Parameter] public string ShortCode { get; set; } = string.Empty;
-    private Meeting? meeting; private IReadOnlyCollection<GridCellAnalysis> analysis = []; private readonly HashSet<Guid> selectedCells = []; private Guid selectedSlotId; private bool isLoading = true; private bool isBusy; private string? errorMessage; private string? ownerToken;
-    private string ParticipantUrl => Navigation.ToAbsoluteUri($"/m/{ShortCode}").ToString();
-    protected override async Task OnInitializedAsync() { ownerToken = HttpContextAccessor.HttpContext?.Request.Cookies[$"timemeet-owner-{ShortCode}"]; if (string.IsNullOrWhiteSpace(ownerToken)) { errorMessage = "РџР°РЅРµР»СЊ РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РѕСЂРіР°РЅРёР·Р°С‚РѕСЂСѓ."; isLoading = false; return; } meeting = await MeetingService.GetForOwnerAsync(ShortCode, ownerToken); if (meeting is null) errorMessage = "Р’СЃС‚СЂРµС‡Р° РЅРµ РЅР°Р№РґРµРЅР° РёР»Рё СЃСЃС‹Р»РєР° СѓРїСЂР°РІР»РµРЅРёСЏ РЅРµРґРµР№СЃС‚РІРёС‚РµР»СЊРЅР°."; isLoading = false; }
-    private async Task AnalyzeAsync() { try { isBusy = true; analysis = await MeetingService.AnalyzeAvailabilityAsync(ShortCode, ownerToken!); } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { errorMessage = ex.Message; } finally { isBusy = false; } }
-    private void ToggleCell(Guid id, bool selected) { if (selected) { if (selectedCells.Count < 5) selectedCells.Add(id); } else selectedCells.Remove(id); }
-    private async Task StartFinalAsync() { try { isBusy = true; await MeetingService.StartFinalPhaseAsync(ShortCode, ownerToken!, new FinalPhaseRequest(selectedCells.ToArray(), null)); meeting = await MeetingService.GetForOwnerAsync(ShortCode, ownerToken!); } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { errorMessage = ex.Message; } finally { isBusy = false; } }
-    private async Task CloseAsync() { try { isBusy = true; await MeetingService.CloseAsync(ShortCode, ownerToken!, selectedSlotId); meeting = await MeetingService.GetForOwnerAsync(ShortCode, ownerToken!); } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { errorMessage = ex.Message; } finally { isBusy = false; } }
-    private string Format(DateTimeOffset value) => value.ToLocalTime().ToString("dd.MM.yyyy HH:mm");
-    private static string GetStatusText(MeetingStatus status) => status switch { MeetingStatus.Active => "РђРєС‚РёРІРЅР°", MeetingStatus.Closed => "Р—Р°РєСЂС‹С‚Р°", MeetingStatus.Archived => "РђСЂС…РёРІРёСЂРѕРІР°РЅР°", _ => "Р§РµСЂРЅРѕРІРёРє" };
+    [Parameter]
+    public string ShortCode { get; set; } = string.Empty;
+
+    private Meeting? meeting;
+    private IReadOnlyCollection<GridCellAnalysis> analysis = [];
+    private bool isLoading = true;
+    private bool isBusy;
+    private string? errorMessage;
+    private string? ownerToken;
+
+    private string ParticipantUrl =>
+        Navigation.ToAbsoluteUri($"/m/{ShortCode}").ToString();
+
+    protected override async Task OnInitializedAsync()
+    {
+        ownerToken = HttpContextAccessor.HttpContext?.Request.Cookies[$"timemeet-owner-{ShortCode}"];
+
+        if (string.IsNullOrWhiteSpace(ownerToken))
+        {
+            errorMessage = "Ссылка владельца недействительна.";
+            isLoading = false;
+            return;
+        }
+
+        meeting = await MeetingService.GetForOwnerAsync(ShortCode, ownerToken);
+
+        if (meeting is null)
+        {
+            errorMessage = "Встреча не найдена или доступ организатора недействителен.";
+        }
+
+        isLoading = false;
+    }
+
+    private async Task AnalyzeAsync()
+    {
+        try
+        {
+            isBusy = true;
+            analysis = await MeetingService.AnalyzeAvailabilityAsync(ShortCode, ownerToken!);
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException
+            or InvalidOperationException
+            or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private Task ArchiveAsync() => ChangeRetentionAsync(MeetingService.ArchiveAsync);
+
+    private async Task DeleteAsync()
+    {
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", "Удалить встречу? Участники увидят, что организатор удалил встречу."))
+        {
+            return;
+        }
+
+        await ChangeRetentionAsync(MeetingService.DeleteAsync);
+    }
+
+    private async Task ChangeRetentionAsync(
+        Func<string, string, CancellationToken, Task> operation)
+    {
+        try
+        {
+            isBusy = true;
+            await operation(ShortCode, ownerToken!, CancellationToken.None);
+            meeting = await MeetingService.GetForOwnerAsync(ShortCode, ownerToken!);
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException
+            or InvalidOperationException
+            or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private Task CloseWithCellAsync(GridCell cell) =>
+        CloseAsync(cell.StartTime, cell.EndTime);
+
+    private Task CloseWithoutSelectionAsync() =>
+        CloseAsync(null, null);
+
+    private async Task CloseAsync(DateTimeOffset? start, DateTimeOffset? end)
+    {
+        try
+        {
+            isBusy = true;
+
+            await MeetingService.CloseAsync(ShortCode, ownerToken!, start, end);
+            meeting = await MeetingService.GetForOwnerAsync(ShortCode, ownerToken!);
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException
+            or InvalidOperationException
+            or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private string Format(DateTimeOffset value) =>
+        value.ToLocalTime().ToString("dd.MM.yyyy HH:mm");
+
+    private static string GetStatusText(MeetingStatus status) =>
+        status switch
+        {
+            MeetingStatus.Active => "Активна",
+            MeetingStatus.Closed => "Закрыта",
+            MeetingStatus.Archived => "Архивирована",
+            MeetingStatus.Deleted => "Удалена",
+            _ => status.ToString()
+        };
+
+    private static string GetRetentionText(RetentionMode mode) =>
+        mode == RetentionMode.DeleteAfterLastDay
+            ? "Удалить после последнего дня"
+            : "Хранить постоянно";
 }

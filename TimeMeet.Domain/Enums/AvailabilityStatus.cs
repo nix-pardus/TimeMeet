@@ -3,6 +3,5 @@
 public enum AvailabilityStatus
 {
     Available, 
-    IfNeeded, 
-    Unavailable
+    IfNeeded
 }
