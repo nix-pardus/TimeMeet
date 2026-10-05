@@ -16,7 +16,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IMeetingService, MeetingService>();
 builder.Services.AddScoped<ICalendarExporter, CalendarExporter>();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Host=localhost;Port=5432;Database=timemeetapp;Username=postgres;Password=postgress";
-builder.Services.AddDbContext<TimeMeetDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContextFactory<TimeMeetDbContext>(options => options.UseNpgsql(connectionString));
 
 var app = builder.Build();
 
@@ -48,6 +48,9 @@ app.MapGet("/manage-access/{shortCode}", (HttpContext httpContext, string shortC
         IsEssential = true
     });
 
+    return Results.Redirect($"/manage/{Uri.EscapeDataString(shortCode)}");
+});
+
 app.MapGet("/export/{shortCode}/{format}", async (HttpContext httpContext, string shortCode, string format, IMeetingService meetingService, ICalendarExporter calendarExporter) =>
 {
     var token = httpContext.Request.Cookies[$"timemeet-owner-{shortCode}"];
@@ -62,9 +65,6 @@ app.MapGet("/export/{shortCode}/{format}", async (HttpContext httpContext, strin
         "csv" => Results.File(System.Text.Encoding.UTF8.GetBytes($"Title,Organizer,StartUtc,EndUtc\r\n\"{meeting.Title.Replace("\"", "\"\"")}\",\"{meeting.OrganizerName.Replace("\"", "\"\"")}\",{slot.StartTime.UtcDateTime:O},{slot.EndTime.UtcDateTime:O}\r\n"), "text/csv", $"{shortCode}.csv"),
         _ => Results.BadRequest("Поддерживаются форматы ics, csv и json.")
     };
-});
-
-    return Results.Redirect($"/manage/{Uri.EscapeDataString(shortCode)}");
 });
 
 app.MapGet("/participant-access/{shortCode}", async (
