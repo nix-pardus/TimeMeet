@@ -62,6 +62,40 @@ public sealed class MeetingServicePostgreSqlTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Access_ValidOwnerTokenReturnsMeeting_InvalidTokenDoesNot()
+    {
+        var service = new MeetingService(dbContextFactory);
+        var date = new DateOnly(2027, 2, 1);
+        var created = await service.CreateAsync(CreateRequest(date, date, "Europe/Moscow", 60));
+
+        var authorized = await service.GetForOwnerAsync(created.Meeting.ShortCode, created.OwnerToken);
+        var unauthorized = await service.GetForOwnerAsync(created.Meeting.ShortCode, "invalid-owner-token");
+
+        Assert.NotNull(authorized);
+        Assert.Equal(created.Meeting.Id, authorized.Id);
+        Assert.Null(unauthorized);
+    }
+
+    [Fact]
+    public async Task Access_ValidParticipantTokenReturnsParticipant_InvalidTokenDoesNot()
+    {
+        var service = new MeetingService(dbContextFactory);
+        var date = new DateOnly(2027, 2, 2);
+        var created = await service.CreateAsync(CreateRequest(date, date, "Europe/Moscow", 60));
+
+        var authorized = await service.GetForParticipantAsync(
+            created.Meeting.ShortCode,
+            created.OrganizerParticipantToken);
+        var unauthorized = await service.GetForParticipantAsync(
+            created.Meeting.ShortCode,
+            "invalid-participant-token");
+
+        Assert.NotNull(authorized?.Participant);
+        Assert.Equal(created.OrganizerParticipantToken, authorized.Participant.ParticipantToken);
+        Assert.Null(unauthorized?.Participant);
+    }
+
+    [Fact]
     public async Task CreateMeeting_GeneratesExpectedCellsOnDstDays()
     {
         var springDstDay = new DateOnly(2027, 3, 28);
