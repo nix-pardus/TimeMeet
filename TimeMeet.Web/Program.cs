@@ -38,6 +38,7 @@ builder.Services.AddHangfireServer();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IMeetingService, MeetingService>();
 builder.Services.AddScoped<ICalendarExporter, CalendarExporter>();
+builder.Services.AddSingleton<IMeetingQrCodeGenerator, QrCodeGenerator>();
 builder.Services.AddDbContextFactory<TimeMeetDbContext>(options => options.UseNpgsql(connectionString));
 
 var app = builder.Build();
