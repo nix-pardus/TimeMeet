@@ -55,6 +55,42 @@ app.UseHttpsRedirection();
 app.UseAntiforgery();
 app.UseRateLimiter();
 
+app.Use(async (httpContext, next) =>
+{
+    if (httpContext.Request.Path.StartsWithSegments("/manage"))
+    {
+        httpContext.Response.Headers["Referrer-Policy"] = "no-referrer";
+
+        var segments = httpContext.Request.Path.Value?
+            .Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        if (segments is { Length: 2 } && segments[0].Equals("manage", StringComparison.OrdinalIgnoreCase) &&
+            httpContext.Request.Query.TryGetValue("key", out var key) &&
+            !string.IsNullOrWhiteSpace(key))
+        {
+            var meetingService = httpContext.RequestServices.GetRequiredService<IMeetingService>();
+            var shortCode = segments[1];
+
+            if (await meetingService.GetForOwnerAsync(shortCode, key.ToString()) is not null)
+            {
+                httpContext.Response.Cookies.Append($"timemeet-owner-{shortCode}", key.ToString(), new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = !app.Environment.IsDevelopment(),
+                    SameSite = SameSiteMode.Lax,
+                    MaxAge = TimeSpan.FromDays(90),
+                    IsEssential = true
+                });
+
+                httpContext.Response.Redirect($"/manage/{Uri.EscapeDataString(shortCode)}");
+                return;
+            }
+        }
+    }
+
+    await next();
+});
+
 app.UseHangfireDashboard("/hangfire", new DashboardOptions
 {
     Authorization = [new LocalRequestsOnlyDashboardAuthorizationFilter()]
@@ -66,11 +102,21 @@ RecurringJob.AddOrUpdate<MeetingRetentionJob>(
     "0 3 * * *",
     new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
 
-app.MapGet("/manage-access/{shortCode}", (HttpContext httpContext, string shortCode, string token, string? participantToken) =>
+app.MapGet("/manage-access/{shortCode}", async (
+    HttpContext httpContext,
+    string shortCode,
+    string token,
+    string? participantToken,
+    IMeetingService meetingService) =>
 {
     if (string.IsNullOrWhiteSpace(token))
     {
         return Results.BadRequest("Токен владельца не указан.");
+    }
+
+    if (await meetingService.GetForOwnerAsync(shortCode, token) is null)
+    {
+        return Results.BadRequest("Ссылка управления недействительна.");
     }
 
     httpContext.Response.Cookies.Append($"timemeet-owner-{shortCode}", token, new CookieOptions
@@ -140,7 +186,7 @@ app.MapGet("/participant-access/{shortCode}", async (
     });
 
     return Results.Redirect($"/m/{Uri.EscapeDataString(shortCode)}");
-});
+}).RequireRateLimiting("public");
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
