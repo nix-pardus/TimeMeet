@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\TimeMeet.Application\TimeMeet.Application.csproj" />
     <ProjectReference Include="..\TimeMeet.Domain\TimeMeet.Domain.csproj" />
+    <ProjectReference Include="..\TimeMeet.Infrastructure\TimeMeet.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

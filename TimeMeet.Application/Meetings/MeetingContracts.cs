@@ -35,6 +35,11 @@ public interface ICalendarExporter
     Task<byte[]> ExportAsync(Meeting meeting, CancellationToken cancellationToken = default);
 }
 
+public interface IMeetingQrCodeGenerator
+{
+    byte[] Generate(string content);
+}
+
 public interface IMeetingService
 {
     Task<CreatedMeeting> CreateAsync(CreateMeetingRequest request, CancellationToken cancellationToken = default);
