@@ -1,6 +1,7 @@
 @page "/m/{ShortCode}"
 @using System.ComponentModel.DataAnnotations
 @using System.Globalization
+@using Microsoft.AspNetCore.Components.Web
 @using TimeMeet.Application.Meetings
 @using TimeMeet.Domain.Entities
 @using TimeMeet.Domain.Enums
@@ -86,7 +87,7 @@ else if (meeting is not null && participant is not null) {
     <MudPaper Class="pa-4">
         <MudText Typo="Typo.h6">Свободная сетка</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-            @(showAll ? "Агрегированная доступность участников." : "Нажимайте на ячейку: свободен → если нужно → не отмечено.")
+            @(showAll ? "Агрегированная доступность участников." : "Нажимайте на ячейку или проведите по сетке: свободен → если нужно → не отмечено.")
         </MudText>
         <div class="heatmap-scroll">
             <div class="heatmap-layout" style="--heatmap-columns: @heatmapDates.Count">
@@ -104,7 +105,7 @@ else if (meeting is not null && participant is not null) {
                             <div class="heatmap-date-header">@FormatDateHeader(date)</div>
                         }
                     </div>
-                    <div class="heatmap-body">
+                    <div class="heatmap-body" @onpointerup="EndPainting" @onpointercancel="EndPainting">
                         @foreach (var hour in hours)
                         {
                             @foreach (var date in heatmapDates)
@@ -135,6 +136,8 @@ else if (meeting is not null && participant is not null) {
                                                         title="@GetOwnTooltip(cell)"
                                                         aria-label="@GetOwnTooltip(cell)"
                                                         disabled="@(!canEdit || isSaving)"
+                                                         @onpointerdown="@(args => BeginPaintingAsync(cell.Id, args))"
+                                                         @onpointerenter="@(() => PaintCell(cell.Id))"
                                                         @onclick="@(() => CycleStatusAsync(cell.Id))">
                                                     <span>@GetStatusShort(GetStatus(cell.Id))</span>
                                                 </button>
@@ -172,6 +175,10 @@ else if (meeting is not null && participant is not null) {
     private bool hasSavedChanges;
     private bool timeZoneInitialized;
     private bool showAll;
+    private bool isPainting;
+    private bool suppressNextClick;
+    private AvailabilityStatus? paintingStatus;
+    private Guid? lastPaintedCell;
     private string? errorMessage;
     private bool canEdit => meeting is not null && meeting.Status == MeetingStatus.Active && IsCurrentPhaseOpen();
     private string ManagementUrl => MeetingNavigation.GetManagementPath(ShortCode);
@@ -198,13 +205,46 @@ else if (meeting is not null && participant is not null) {
     private async Task CycleStatusAsync(Guid id)
     {
         if (!canEdit || participant is null) return;
+        if (suppressNextClick) { suppressNextClick = false; return; }
         if (participant.HasNoSuitableTime) await SetNoSuitableTimeAsync(false);
-        if (!statuses.TryGetValue(id, out var value)) statuses[id] = AvailabilityStatus.Available;
-        else if (value == AvailabilityStatus.Available) statuses[id] = AvailabilityStatus.IfNeeded;
-        else statuses.Remove(id);
+        SetStatus(id, GetNextStatus(GetStatus(id)));
+    }
+    private async Task BeginPaintingAsync(Guid id, PointerEventArgs args)
+    {
+        if (!canEdit || participant is null || isSaving || args.Button != 0) return;
+        if (participant.HasNoSuitableTime) await SetNoSuitableTimeAsync(false);
+        isPainting = true;
+        paintingStatus = GetNextStatus(GetStatus(id));
+        lastPaintedCell = null;
+        PaintCell(id);
+    }
+    private void PaintCell(Guid id)
+    {
+        if (!isPainting || lastPaintedCell == id) return;
+        SetStatus(id, paintingStatus);
+        lastPaintedCell = id;
+    }
+    private void EndPainting()
+    {
+        if (!isPainting) return;
+        isPainting = false;
+        paintingStatus = null;
+        lastPaintedCell = null;
+        suppressNextClick = true;
+    }
+    private void SetStatus(Guid id, AvailabilityStatus? status)
+    {
+        if (status is null) statuses.Remove(id);
+        else statuses[id] = status.Value;
         hasSavedChanges = false;
         _ = ScheduleSaveAsync();
     }
+    private static AvailabilityStatus? GetNextStatus(AvailabilityStatus? value) => value switch
+    {
+        null => AvailabilityStatus.Available,
+        AvailabilityStatus.Available => AvailabilityStatus.IfNeeded,
+        _ => null
+    };
     private async Task SetNoSuitableTimeAsync(bool value) { if (!canEdit || participant is null) return; try { await MeetingService.SetNoSuitableTimeAsync(ShortCode, participant.ParticipantToken, value); participant.HasNoSuitableTime = value; statuses.Clear(); } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { errorMessage = ex.Message; } }
     private async Task ScheduleSaveAsync() { saveCancellation?.Cancel(); saveCancellation = new(); var ct = saveCancellation.Token; try { await Task.Delay(1000, ct); isSaving = true; await InvokeAsync(StateHasChanged); await MeetingService.SaveAvailabilityAsync(ShortCode, participant!.ParticipantToken, statuses.Select(x => new AvailabilitySelection(x.Key, x.Value)).ToArray(), ct); hasSavedChanges = true; } catch (OperationCanceledException) when (ct.IsCancellationRequested) { } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { errorMessage = ex.Message; } finally { if (!ct.IsCancellationRequested) { isSaving = false; await InvokeAsync(StateHasChanged); } } }
     private AvailabilityStatus? GetStatus(Guid id) => statuses.TryGetValue(id, out var value) ? value : null;
