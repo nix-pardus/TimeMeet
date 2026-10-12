@@ -12,153 +12,174 @@
 
 <PageTitle>Голосование — TimeMeet</PageTitle>
 <MudContainer MaxWidth="MaxWidth.Large">
-@if (isLoading) { <MudSkeleton Height="220px" /> }
-else if (!string.IsNullOrWhiteSpace(errorMessage)) { <MudAlert Severity="Severity.Error">@errorMessage</MudAlert> }
-else if (meeting is not null && meeting.Status == MeetingStatus.Deleted) {
-    <MudPaper Class="pa-6">
-        <MudText Typo="Typo.h4">@meeting.Title</MudText>
-        <MudAlert Severity="Severity.Warning" Class="mt-4">
-            @(meeting.DeletionReason == MeetingDeletionReason.Manual
-                ? "Организатор удалил встречу. Голосование больше недоступно."
-                : "Срок хранения встречи истёк. Голосование больше недоступно.")
-        </MudAlert>
-    </MudPaper>
-}
-else if (meeting is not null && meeting.Status == MeetingStatus.Archived) {
-    <MudPaper Class="pa-6">
-        <MudText Typo="Typo.h4">@meeting.Title</MudText>
-        <MudAlert Severity="Severity.Info" Class="mt-4">Встреча архивирована. Голосование больше недоступно.</MudAlert>
-    </MudPaper>
-}
-else if (meeting is not null && participant is null) {
-    <MudPaper Class="pa-6"><MudText Typo="Typo.h4">@meeting.Title</MudText><MudText Class="mb-4">Организатор: @meeting.OrganizerName</MudText>
-    <EditForm Model="participantModel" OnValidSubmit="CreateParticipantAsync"><DataAnnotationsValidator /><MudTextField @bind-Value="participantModel.DisplayName" Label="Ваше имя" Required="true" /><MudTextField @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" /><MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="mt-4">Продолжить</MudButton></EditForm></MudPaper>
-}
-else if (meeting is not null && participant is not null) {
-    <MudText Typo="Typo.h4" Class="mb-2">@meeting.Title</MudText>
-    <MudText Color="Color.Secondary" Class="mb-2">Свободная сетка · @participant.DisplayName</MudText>
-    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-4">
-        @participant.DisplayName · @participant.TimeZone · @GetTimeZoneOffset()
-    </MudText>
-    @if (participant.IsOrganizer)
+    @if (isLoading)
     {
-        <MudButton Href="@ManagementUrl"
-                   Variant="Variant.Outlined"
-                   Color="Color.Secondary"
-                   StartIcon="@Icons.Material.Filled.Settings"
-                   Class="mb-4">
-            Управление встречей и результаты
-        </MudButton>
+        <MudSkeleton Height="220px" />
     }
-    <div class="heatmap-toolbar">
-        <div class="heatmap-view-switcher" role="group" aria-label="Режим отображения">
-            <MudButton Variant="@(showAll ? Variant.Outlined : Variant.Filled)"
-                       Color="Color.Primary"
-                       OnClick="@(() => showAll = false)">
-                Моя доступность
-            </MudButton>
-            <MudButton Variant="@(showAll ? Variant.Filled : Variant.Outlined)"
-                       Color="Color.Primary"
-                       OnClick="@(() => showAll = true)">
-                Показать всех
-            </MudButton>
-        </div>
-        @if (canEdit)
-        {
-            <MudCheckBox T="bool"
-                         Value="@(participant.HasNoSuitableTime)"
-                         ValueChanged="SetNoSuitableTimeAsync"
-                         Label="Мне не подходит ни одно время" />
-        }
-    </div>
-
-    @if (!canEdit && !showAll)
+    else if (!string.IsNullOrWhiteSpace(errorMessage))
     {
-        <MudAlert Severity="Severity.Info" Class="mb-4">Новые отметки недоступны: голосование закрыто.</MudAlert>
-    }
 
-    @if (showAll && !hasVotedParticipants)
+        <MudAlert Severity="Severity.Error">@errorMessage</MudAlert>
+    }
+    else if (meeting is not null && meeting.Status == MeetingStatus.Deleted)
     {
-        <MudAlert Severity="Severity.Info" Class="mb-4">
-            Пока никто не отметил доступность. Поделитесь ссылкой с участниками.
-        </MudAlert>
+        <MudPaper Class="pa-6">
+            <MudText Typo="Typo.h4">@meeting.Title</MudText>
+            <MudAlert Severity="Severity.Warning" Class="mt-4">
+                @(meeting.DeletionReason == MeetingDeletionReason.Manual
+                    ? "Организатор удалил встречу. Голосование больше недоступно."
+                    : "Срок хранения встречи истёк. Голосование больше недоступно.")
+            </MudAlert>
+        </MudPaper>
     }
-
-    <MudPaper Class="pa-4">
-        <MudText Typo="Typo.h6">Свободная сетка</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-            @(showAll ? "Агрегированная доступность участников." : "Нажимайте на ячейку или проведите по сетке: свободен → если нужно → не отмечено.")
+    else if (meeting is not null && meeting.Status == MeetingStatus.Archived)
+    {
+        <MudPaper Class="pa-6">
+            <MudText Typo="Typo.h4">@meeting.Title</MudText>
+            <MudAlert Severity="Severity.Info" Class="mt-4">Встреча архивирована. Голосование больше недоступно.</MudAlert>
+        </MudPaper>
+    }
+    else if (meeting is not null && participant is null)
+    {
+        <MudPaper Class="pa-6">
+            <MudText Typo="Typo.h4">@meeting.Title</MudText><MudText Class="mb-4">Организатор: @meeting.OrganizerName</MudText>
+            <EditForm Model="participantModel" OnValidSubmit="CreateParticipantAsync"><DataAnnotationsValidator /><MudTextField @bind-Value="participantModel.DisplayName" Label="Ваше имя" Required="true" /><MudTextField @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" /><MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="mt-4">Продолжить</MudButton></EditForm>
+        </MudPaper>
+    }
+    else if (meeting is not null && participant is not null)
+    {
+        <MudText Typo="Typo.h4" Class="mb-2">@meeting.Title</MudText>
+        <MudText Color="Color.Secondary" Class="mb-2">Свободная сетка · @participant.DisplayName</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-4">
+            @participant.DisplayName · @participant.TimeZone · @GetTimeZoneOffset()
         </MudText>
-        <div class="heatmap-scroll">
-            <div class="heatmap-layout" style="--heatmap-columns: @heatmapDates.Count">
-                <div class="heatmap-time-axis">
-                    <div class="heatmap-corner">Время</div>
-                    @foreach (var hour in hours)
-                    {
-                        <div class="heatmap-hour-label"><span>@($"{hour:00}:00")</span></div>
-                    }
-                </div>
-                <div class="heatmap-days-area">
-                    <div class="heatmap-date-headers">
-                        @foreach (var date in heatmapDates)
-                        {
-                            <div class="heatmap-date-header">@FormatDateHeader(date)</div>
-                        }
-                    </div>
-                    <div class="heatmap-body" @onpointerup="EndPainting" @onpointercancel="EndPainting">
+        @if (participant.IsOrganizer)
+        {
+            <MudButton Href="@ManagementUrl"
+                       Variant="Variant.Outlined"
+                       Color="Color.Secondary"
+                       StartIcon="@Icons.Material.Filled.Settings"
+                       Class="mb-4">
+                Управление встречей и результаты
+            </MudButton>
+        }
+        <div class="heatmap-toolbar">
+            <div class="heatmap-view-switcher" role="group" aria-label="Режим отображения">
+                <MudButton Variant="@(showAll ? Variant.Outlined : Variant.Filled)"
+                           Color="Color.Primary"
+                           OnClick="@(() => showAll = false)">
+                    Моя доступность
+                </MudButton>
+                <MudButton Variant="@(showAll ? Variant.Filled : Variant.Outlined)"
+                           Color="Color.Primary"
+                           OnClick="@(() => showAll = true)">
+                    Показать всех
+                </MudButton>
+            </div>
+            @if (canEdit)
+            {
+                <MudCheckBox T="bool"
+                             Value="@(participant.HasNoSuitableTime)"
+                             ValueChanged="SetNoSuitableTimeAsync"
+                             Label="Мне не подходит ни одно время" />
+            }
+        </div>
+
+        @if (!canEdit && !showAll)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-4">Новые отметки недоступны: голосование закрыто.</MudAlert>
+        }
+
+        @if (showAll && !hasVotedParticipants)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-4">
+                Пока никто не отметил доступность. Поделитесь ссылкой с участниками.
+            </MudAlert>
+        }
+
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Свободная сетка</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+                @(showAll ? "Агрегированная доступность участников." : "Нажимайте на ячейку или проведите по сетке: свободен → если нужно → не отмечено.")
+            </MudText>
+            <div class="heatmap-scroll">
+                <div class="heatmap-layout" style="--heatmap-columns: @heatmapDates.Count">
+                    <div class="heatmap-time-axis">
+                        <div class="heatmap-corner">Время</div>
                         @foreach (var hour in hours)
                         {
+                            <div class="heatmap-hour-label"><span>@($"{hour:00}:00")</span></div>
+                        }
+                    </div>
+                    <div class="heatmap-days-area">
+                        <div class="heatmap-date-headers">
                             @foreach (var date in heatmapDates)
                             {
-                                var cells = GetCells(date, hour);
-                                <div class="heatmap-cell-group" style="--heatmap-cell-count: @Math.Max(cells.Count, 1)">
-                                    @if (cells.Count == 0)
-                                    {
-                                        <span class="heatmap-cell-empty-slot">—</span>
-                                    }
-                                    else
-                                    {
-                                        @foreach (var cell in cells)
+                                <div class="heatmap-date-header">@FormatDateHeader(date)</div>
+                            }
+                        </div>
+                        <div class="heatmap-body" @onpointerup="EndPainting" @onpointercancel="EndPainting">
+                            @foreach (var hour in hours)
+                            {
+                                @foreach (var date in heatmapDates)
+                                {
+                                    var cells = GetCells(date, hour);
+                                    <div class="heatmap-cell-group" style="--heatmap-cell-count: @Math.Max(cells.Count, 1)">
+                                        @if (cells.Count == 0)
                                         {
-                                            var summary = GetSummary(cell);
-                                            @if (showAll)
+                                            <span class="heatmap-cell-empty-slot">—</span>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var cell in cells)
                                             {
-                                                <div class="heatmap-cell @GetAggregateClass(summary)"
-                                                     title="@GetTooltip(cell, summary)"
-                                                     aria-label="@GetTooltip(cell, summary)">
-                                                    <span>@summary.AvailableCount</span>
-                                                </div>
-                                            }
-                                            else
-                                            {
-                                                <button type="button"
-                                                        class="heatmap-cell @GetOwnCellClass(cell.Id)"
-                                                        title="@GetOwnTooltip(cell)"
-                                                        aria-label="@GetOwnTooltip(cell)"
-                                                        disabled="@(!canEdit || isSaving)"
-                                                         @onpointerdown="@(args => BeginPaintingAsync(cell.Id, args))"
-                                                         @onpointerenter="@(() => PaintCell(cell.Id))"
-                                                        @onclick="@(() => CycleStatusAsync(cell.Id))">
-                                                    <span>@GetStatusShort(GetStatus(cell.Id))</span>
-                                                </button>
+                                                var summary = GetSummary(cell);
+                                                @if (showAll)
+                                                {
+                                                    <div class="heatmap-cell @GetAggregateClass(summary)"
+                                                         title="@GetTooltip(cell, summary)"
+                                                         aria-label="@GetTooltip(cell, summary)">
+                                                        <span>@summary.AvailableCount</span>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <button type="button"
+                                                            class="heatmap-cell @GetOwnCellClass(cell.Id)"
+                                                            title="@GetOwnTooltip(cell)"
+                                                            aria-label="@GetOwnTooltip(cell)"
+                                                            disabled="@(!canEdit || isSaving)"
+                                                            @onpointerdown="@(args => BeginPaintingAsync(cell.Id, args))"
+                                                            @onpointerenter="@(() => PaintCell(cell.Id))"
+                                                            @onclick="@(() => CycleStatusAsync(cell.Id))">
+                                                        <span>@GetStatusShort(GetStatus(cell.Id))</span>
+                                                    </button>
+                                                }
                                             }
                                         }
-                                    }
-                                </div>
+                                    </div>
+                                }
                             }
-                        }
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-        <div class="heatmap-legend">
-            <span><i class="legend-swatch heatmap-cell-available-4"></i>Свободен</span>
-            <span><i class="legend-swatch heatmap-cell-if-needed"></i>Если нужно</span>
-            <span><i class="legend-swatch heatmap-cell-unmarked"></i>Не отмечено</span>
-        </div>
-        @if (isSaving) { <MudText Typo="Typo.caption">Сохранение…</MudText> } else if (hasSavedChanges) { <MudText Typo="Typo.caption" Color="Color.Success">Сохранено</MudText> }
-    </MudPaper>
-}
+            <div class="heatmap-legend">
+                <span><i class="legend-swatch heatmap-cell-available-4"></i>Свободен</span>
+                <span><i class="legend-swatch heatmap-cell-if-needed"></i>Если нужно</span>
+                <span><i class="legend-swatch heatmap-cell-unmarked"></i>Не отмечено</span>
+            </div>
+            @if (isSaving)
+            {
+                <MudText Typo="Typo.caption">Сохранение…</MudText>
+            }
+            else if (hasSavedChanges)
+            {
+
+                <MudText Typo="Typo.caption" Color="Color.Success">Сохранено</MudText>
+            }
+        </MudPaper>
+    }
 </MudContainer>
 
 @code {
@@ -194,95 +215,286 @@ else if (meeting is not null && participant is not null) {
 
     protected override async Task OnInitializedAsync()
     {
-        var token = HttpContextAccessor.HttpContext?.Request.Cookies[$"timemeet-participant-{ShortCode}"]; var access = await MeetingService.GetForParticipantAsync(ShortCode, token);
+        var token = HttpContextAccessor.HttpContext?.Request.Cookies[$"timemeet-participant-{ShortCode}"];
+        var access = await MeetingService.GetForParticipantAsync(ShortCode, token);
         if (access is null) { errorMessage = "Встреча не найдена."; isLoading = false; return; }
         meeting = access.Meeting; participant = access.Participant;
-        if (participant is not null) foreach (var answer in participant.Availabilities) statuses[answer.GridCellId] = answer.Status;
+        if (participant is not null)
+            foreach (var answer in participant.Availabilities)
+                statuses[answer.GridCellId] = answer.Status;
         isLoading = false;
     }
-    protected override async Task OnAfterRenderAsync(bool firstRender) { if (!firstRender || timeZoneInitialized || participant is not null) return; timeZoneInitialized = true; try { participantModel.TimeZone = await JSRuntime.InvokeAsync<string>("timeMeet.getTimeZone"); await InvokeAsync(StateHasChanged); } catch (JSException) { } }
-    private async Task CreateParticipantAsync() { try { var result = await MeetingService.CreateParticipantAsync(ShortCode, participantModel.DisplayName, participantModel.TimeZone); Navigation.NavigateTo($"/participant-access/{Uri.EscapeDataString(ShortCode)}?token={Uri.EscapeDataString(result.ParticipantToken)}", true); } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { errorMessage = ex.Message; } }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || timeZoneInitialized || participant is not null) return;
+        timeZoneInitialized = true;
+        try
+        {
+            participantModel.TimeZone = await JSRuntime.InvokeAsync<string>("timeMeet.getTimeZone");
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (JSException) { }
+    }
+
+    private async Task CreateParticipantAsync()
+    {
+        try
+        {
+            var result = await MeetingService.CreateParticipantAsync(ShortCode, participantModel.DisplayName, participantModel.TimeZone);
+            Navigation.NavigateTo($"/participant-access/{Uri.EscapeDataString(ShortCode)}?token={Uri.EscapeDataString(result.ParticipantToken)}", true);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
     private async Task CycleStatusAsync(Guid id)
     {
-        if (!canEdit || participant is null) return;
-        if (suppressNextClick) { suppressNextClick = false; return; }
-        if (participant.HasNoSuitableTime) await SetNoSuitableTimeAsync(false);
+        if (!canEdit || participant is null)
+            return;
+
+        if (suppressNextClick)
+        {
+            suppressNextClick = false;
+            return;
+        }
+
+        if (participant.HasNoSuitableTime)
+            await SetNoSuitableTimeAsync(false);
+
         SetStatus(id, GetNextStatus(GetStatus(id)));
     }
+
     private async Task BeginPaintingAsync(Guid id, PointerEventArgs args)
     {
-        if (!canEdit || participant is null || isSaving || args.Button != 0) return;
-        if (participant.HasNoSuitableTime) await SetNoSuitableTimeAsync(false);
+        if (!canEdit || participant is null || isSaving || args.Button != 0)
+            return;
+
+        if (participant.HasNoSuitableTime)
+            await SetNoSuitableTimeAsync(false);
+
         isPainting = true;
         paintingStatus = GetNextStatus(GetStatus(id));
         lastPaintedCell = null;
         PaintCell(id);
     }
+
     private void PaintCell(Guid id)
     {
-        if (!isPainting || lastPaintedCell == id) return;
+        if (!isPainting || lastPaintedCell == id)
+            return;
+
         SetStatus(id, paintingStatus);
         lastPaintedCell = id;
     }
+
     private void EndPainting()
     {
-        if (!isPainting) return;
+        if (!isPainting)
+            return;
+
         isPainting = false;
         paintingStatus = null;
         lastPaintedCell = null;
         suppressNextClick = true;
     }
+
     private void SetStatus(Guid id, AvailabilityStatus? status)
     {
-        if (status is null) statuses.Remove(id);
-        else statuses[id] = status.Value;
+        if (status is null)
+            statuses.Remove(id);
+        else
+            statuses[id] = status.Value;
+
         hasSavedChanges = false;
         _ = ScheduleSaveAsync();
     }
+
     private static AvailabilityStatus? GetNextStatus(AvailabilityStatus? value) => value switch
     {
         null => AvailabilityStatus.Available,
         AvailabilityStatus.Available => AvailabilityStatus.IfNeeded,
         _ => null
     };
-    private async Task SetNoSuitableTimeAsync(bool value) { if (!canEdit || participant is null) return; try { await MeetingService.SetNoSuitableTimeAsync(ShortCode, participant.ParticipantToken, value); participant.HasNoSuitableTime = value; statuses.Clear(); } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { errorMessage = ex.Message; } }
-    private async Task ScheduleSaveAsync() { saveCancellation?.Cancel(); saveCancellation = new(); var ct = saveCancellation.Token; try { await Task.Delay(1000, ct); isSaving = true; await InvokeAsync(StateHasChanged); await MeetingService.SaveAvailabilityAsync(ShortCode, participant!.ParticipantToken, statuses.Select(x => new AvailabilitySelection(x.Key, x.Value)).ToArray(), ct); hasSavedChanges = true; } catch (OperationCanceledException) when (ct.IsCancellationRequested) { } catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { errorMessage = ex.Message; } finally { if (!ct.IsCancellationRequested) { isSaving = false; await InvokeAsync(StateHasChanged); } } }
-    private AvailabilityStatus? GetStatus(Guid id) => statuses.TryGetValue(id, out var value) ? value : null;
-    private TimeZoneInfo ParticipantTimeZone => TimeZoneInfo.FindSystemTimeZoneById(participant?.TimeZone ?? participantModel.TimeZone);
-    private DateTimeOffset ToParticipantTime(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, ParticipantTimeZone);
-    private IReadOnlyList<GridCell> GetCells(DateOnly date, int hour) => meeting?.GridCells.Where(x => { var local = ToParticipantTime(x.StartTime); return DateOnly.FromDateTime(local.DateTime) == date && local.Hour == hour; }).OrderBy(x => x.StartTime).ToArray() ?? [];
-    private string FormatDateHeader(DateOnly date) => date.ToDateTime(TimeOnly.MinValue).ToString("d MMMM", RussianCulture);
-    private string GetTimeZoneOffset() { var offset = ParticipantTimeZone.GetUtcOffset(DateTimeOffset.UtcNow); var sign = offset < TimeSpan.Zero ? "-" : "+"; var value = offset.Duration(); return $"UTC{sign}{value.Hours + (value.Minutes == 0 ? "" : $":{value.Minutes:00}")}"; }
-    private string GetOwnCellClass(Guid id) => GetStatus(id) switch { AvailabilityStatus.Available => "heatmap-cell-available-4", AvailabilityStatus.IfNeeded => "heatmap-cell-if-needed", _ => "heatmap-cell-unmarked" };
-    private static string GetStatusShort(AvailabilityStatus? value) => value switch { AvailabilityStatus.Available => "✓", AvailabilityStatus.IfNeeded => "?", _ => "" };
-    private static bool HasVoted(Participant value) => value.HasNoSuitableTime || value.Availabilities.Count > 0;
-    private static AvailabilityStatus? GetParticipantStatus(Participant value, Guid cellId) => value.Availabilities.FirstOrDefault(x => x.GridCellId == cellId)?.Status;
+
+    private async Task SetNoSuitableTimeAsync(bool value)
+    {
+        if (!canEdit || participant is null)
+            return;
+
+        try
+        {
+            await MeetingService.SetNoSuitableTimeAsync(ShortCode, participant.ParticipantToken, value);
+            participant.HasNoSuitableTime = value;
+            statuses.Clear();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task ScheduleSaveAsync()
+    {
+        saveCancellation?.Cancel();
+        saveCancellation = new();
+        var ct = saveCancellation.Token;
+        try
+        {
+            await Task.Delay(1000, ct);
+            isSaving = true;
+            await InvokeAsync(StateHasChanged);
+            await MeetingService.SaveAvailabilityAsync(
+                ShortCode,
+                participant!.ParticipantToken,
+                statuses.Select(x => new AvailabilitySelection(x.Key, x.Value)).ToArray(),
+                ct
+            );
+            hasSavedChanges = true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                isSaving = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private AvailabilityStatus? GetStatus(Guid id) =>
+        statuses.TryGetValue(id, out var value) ? value : null;
+
+    private TimeZoneInfo ParticipantTimeZone =>
+        TimeZoneInfo.FindSystemTimeZoneById(participant?.TimeZone ?? participantModel.TimeZone);
+
+    private DateTimeOffset ToParticipantTime(DateTimeOffset value) =>
+        TimeZoneInfo.ConvertTime(value, ParticipantTimeZone);
+
+    private IReadOnlyList<GridCell> GetCells(DateOnly date, int hour) =>
+        meeting?.GridCells
+            .Where(x =>
+            {
+                var local = ToParticipantTime(x.StartTime);
+                return DateOnly.FromDateTime(local.DateTime) == date && local.Hour == hour;
+            })
+            .OrderBy(x => x.StartTime).ToArray() ?? [];
+
+    private string FormatDateHeader(DateOnly date) =>
+        date.ToDateTime(TimeOnly.MinValue).ToString("d MMMM", RussianCulture);
+
+    private string GetTimeZoneOffset()
+    {
+        var offset = ParticipantTimeZone.GetUtcOffset(DateTimeOffset.UtcNow);
+        var sign = offset < TimeSpan.Zero ? "-" : "+"; var value = offset.Duration();
+        return $"UTC{sign}{value.Hours + (value.Minutes == 0 ? "" : $":{value.Minutes:00}")}";
+    }
+
+    private string GetOwnCellClass(Guid id) =>
+        GetStatus(id) switch
+        {
+            AvailabilityStatus.Available => "heatmap-cell-available-4",
+            AvailabilityStatus.IfNeeded => "heatmap-cell-if-needed",
+            _ => "heatmap-cell-unmarked"
+        };
+
+    private static string GetStatusShort(AvailabilityStatus? value) => 
+        value switch 
+        { 
+            AvailabilityStatus.Available => "✓", 
+            AvailabilityStatus.IfNeeded => "?", 
+            _ => "" 
+        };
+
+    private static bool HasVoted(Participant value) =>
+        value.HasNoSuitableTime || value.Availabilities.Count > 0;
+
+    private static AvailabilityStatus? GetParticipantStatus(Participant value, Guid cellId) =>
+        value.Availabilities.FirstOrDefault(x => x.GridCellId == cellId)?.Status;
+
     private CellSummary GetSummary(GridCell cell)
     {
         var voted = meeting?.Participants.Where(HasVoted).ToArray() ?? [];
-        var available = voted.Where(x => GetParticipantStatus(x, cell.Id) == AvailabilityStatus.Available).Select(x => x.DisplayName).ToArray();
-        var ifNeeded = voted.Where(x => GetParticipantStatus(x, cell.Id) == AvailabilityStatus.IfNeeded).Select(x => x.DisplayName).ToArray();
-        var cannot = voted.Where(x => x.HasNoSuitableTime || GetParticipantStatus(x, cell.Id) is null).Select(x => x.DisplayName).ToArray();
+
+        var available = voted
+            .Where(x => GetParticipantStatus(x, cell.Id) == AvailabilityStatus.Available)
+            .Select(x => x.DisplayName)
+            .ToArray();
+
+        var ifNeeded = voted
+            .Where(x => GetParticipantStatus(x, cell.Id) == AvailabilityStatus.IfNeeded)
+            .Select(x => x.DisplayName)
+            .ToArray();
+
+        var cannot = voted
+            .Where(x => x.HasNoSuitableTime || GetParticipantStatus(x, cell.Id) is null)
+            .Select(x => x.DisplayName)
+            .ToArray();
+
         return new CellSummary(available, ifNeeded, cannot, voted.Length);
     }
+
     private static string GetAggregateClass(CellSummary summary)
     {
-        if (summary.IfNeededCount > 0 && summary.AvailableCount > 0) return "heatmap-cell-mixed";
-        if (summary.IfNeededCount > 0) return "heatmap-cell-if-needed";
-        if (summary.AvailableCount == 0) return "heatmap-cell-unmarked";
+        if (summary.IfNeededCount > 0 && summary.AvailableCount > 0) 
+            return "heatmap-cell-mixed";
+
+        if (summary.IfNeededCount > 0) 
+            return "heatmap-cell-if-needed";
+
+        if (summary.AvailableCount == 0) 
+        return "heatmap-cell-unmarked";
+
         var level = summary.VotedCount == 0 ? 0 : (int)Math.Ceiling(summary.AvailableCount * 4d / summary.VotedCount);
+
         return $"heatmap-cell-available-{Math.Clamp(level, 1, 4)}";
     }
-    private string GetOwnTooltip(GridCell cell) => $"{FormatTimeRange(cell)} — {GetStatusText(GetStatus(cell.Id))}";
-    private string GetTooltip(GridCell cell, CellSummary summary) => $"{FormatTimeRange(cell)}\nСвободны: {FormatNames(summary.AvailableNames)} ({summary.AvailableCount} из {summary.VotedCount})\nЕсли нужно: {FormatNames(summary.IfNeededNames)} ({summary.IfNeededCount})\nНе могут: {FormatNames(summary.CannotNames)} ({summary.CannotCount})";
-    private string FormatTimeRange(GridCell cell) => $"{ToParticipantTime(cell.StartTime):HH:mm}–{ToParticipantTime(cell.EndTime):HH:mm}, {ToParticipantTime(cell.StartTime):dddd d MMMM}";
-    private static string FormatNames(IReadOnlyCollection<string> names) => names.Count == 0 ? "—" : string.Join(", ", names);
-    private static string GetStatusText(AvailabilityStatus? value) => value switch { AvailabilityStatus.Available => "Свободен", AvailabilityStatus.IfNeeded => "Если нужно", _ => "Не отмечено" };
-    private sealed record CellSummary(IReadOnlyCollection<string> AvailableNames, IReadOnlyCollection<string> IfNeededNames, IReadOnlyCollection<string> CannotNames, int VotedCount)
+
+    private string GetOwnTooltip(GridCell cell) => 
+        $"{FormatTimeRange(cell)} — {GetStatusText(GetStatus(cell.Id))}";
+
+    private string GetTooltip(GridCell cell, CellSummary summary) => 
+        $"{FormatTimeRange(cell)}\n" +
+        $"Свободны: {FormatNames(summary.AvailableNames)} ({summary.AvailableCount} из {summary.VotedCount})\n" +
+        $"Если нужно: {FormatNames(summary.IfNeededNames)} ({summary.IfNeededCount})\n" +
+        $"Не могут: {FormatNames(summary.CannotNames)} ({summary.CannotCount})";
+
+    private string FormatTimeRange(GridCell cell) => 
+        $"{ToParticipantTime(cell.StartTime):HH:mm}–{ToParticipantTime(cell.EndTime):HH:mm}, " +
+        $"{ToParticipantTime(cell.StartTime):dddd d MMMM}";
+
+    private static string FormatNames(IReadOnlyCollection<string> names) => 
+        names.Count == 0 ? "—" : string.Join(", ", names);
+
+    private static string GetStatusText(AvailabilityStatus? value) => 
+        value switch 
+        {
+            AvailabilityStatus.Available => "Свободен", 
+            AvailabilityStatus.IfNeeded => "Если нужно", 
+            _ => "Не отмечено" 
+        };
+
+    private sealed record CellSummary(
+        IReadOnlyCollection<string> AvailableNames, 
+        IReadOnlyCollection<string> IfNeededNames, 
+        IReadOnlyCollection<string> CannotNames, 
+        int VotedCount)
     {
         public int AvailableCount => AvailableNames.Count;
         public int IfNeededCount => IfNeededNames.Count;
         public int CannotCount => CannotNames.Count;
     }
-    private sealed class ParticipantModel { [Required] public string DisplayName { get; set; } = string.Empty; [Required] public string TimeZone { get; set; } = "Europe/Moscow"; }
+
+    private sealed class ParticipantModel 
+    {
+        [Required] public string DisplayName { get; set; } = string.Empty; 
+        [Required] public string TimeZone { get; set; } = "Europe/Moscow"; 
+    }
 }
