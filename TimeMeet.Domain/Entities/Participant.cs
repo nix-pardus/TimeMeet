@@ -8,6 +8,7 @@ public sealed class Participant
     public required string DisplayName { get; set; }
     public required string TimeZone { get; set; }
     public required string ParticipantToken { get; set; }
+    public string? ParticipantPasswordHash { get; set; }
     public bool HasNoSuitableTime { get; set; }
     public bool IsOrganizer { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

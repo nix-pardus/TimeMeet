@@ -18,6 +18,12 @@
     else if (!string.IsNullOrWhiteSpace(errorMessage))
     {
         <MudAlert Severity="Severity.Error">@errorMessage</MudAlert>
+        <MudButton Href="@($"/manage-login/{Uri.EscapeDataString(ShortCode)}")"
+                   Variant="Variant.Outlined"
+                   Color="Color.Primary"
+                   Class="mt-4">
+            Войти по паролю организатора
+        </MudButton>
     }
     else if (meeting is not null)
     {

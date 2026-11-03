@@ -13,11 +13,14 @@ public sealed class CreateMeetingRequest
     public DateOnly GridEndDate { get; init; }
     public int GridStepMinutes { get; init; }
     public RetentionMode RetentionMode { get; init; } = RetentionMode.KeepForever;
+    public string? OrganizerPassword { get; init; }
 }
 
 public sealed record CreatedMeeting(Meeting Meeting, string OwnerToken, string OrganizerParticipantToken);
 public sealed record ParticipantMeeting(Meeting Meeting, Participant? Participant);
 public sealed record CreatedParticipant(Participant Participant, string ParticipantToken);
+public sealed record AuthenticatedParticipant(Participant Participant, string ParticipantToken);
+public sealed record AuthenticatedOwner(Meeting Meeting, string OwnerToken);
 public sealed record AvailabilitySelection(Guid TargetId, AvailabilityStatus Status);
 
 public sealed record GridCellAnalysis(
@@ -45,7 +48,9 @@ public interface IMeetingService
     Task<CreatedMeeting> CreateAsync(CreateMeetingRequest request, CancellationToken cancellationToken = default);
     Task<Meeting?> GetForOwnerAsync(string shortCode, string ownerToken, CancellationToken cancellationToken = default);
     Task<ParticipantMeeting?> GetForParticipantAsync(string shortCode, string? participantToken, CancellationToken cancellationToken = default);
-    Task<CreatedParticipant> CreateParticipantAsync(string shortCode, string displayName, string timeZone, CancellationToken cancellationToken = default);
+    Task<CreatedParticipant> CreateParticipantAsync(string shortCode, string displayName, string timeZone, string? password = null, CancellationToken cancellationToken = default);
+    Task<AuthenticatedParticipant> AuthenticateParticipantAsync(string shortCode, string displayName, string password, CancellationToken cancellationToken = default);
+    Task<AuthenticatedOwner> AuthenticateOwnerAsync(string shortCode, string password, CancellationToken cancellationToken = default);
     Task SaveAvailabilityAsync(string shortCode, string participantToken, IReadOnlyCollection<AvailabilitySelection> selections, CancellationToken cancellationToken = default);
     Task SetNoSuitableTimeAsync(string shortCode, string participantToken, bool value, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<GridCellAnalysis>> AnalyzeAvailabilityAsync(string shortCode, string ownerToken, CancellationToken cancellationToken = default);

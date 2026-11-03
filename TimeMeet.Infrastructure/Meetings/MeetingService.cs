@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
 using TimeMeet.Application.Meetings;
 using TimeMeet.Domain.Entities;
 using TimeMeet.Domain.Enums;
@@ -10,6 +11,8 @@ namespace TimeMeet.Infrastructure.Meetings;
 public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContextFactory) : IMeetingService
 {
     private const string Base62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    private static readonly PasswordHasher<Meeting> MeetingPasswordHasher = new();
+    private static readonly PasswordHasher<Participant> ParticipantPasswordHasher = new();
 
     public async Task<CreatedMeeting> CreateAsync(CreateMeetingRequest request, CancellationToken cancellationToken = default)
     {
@@ -36,6 +39,9 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             CreatedAt = now
         };
 
+        if (!string.IsNullOrWhiteSpace(request.OrganizerPassword))
+            meeting.OwnerPasswordHash = MeetingPasswordHasher.HashPassword(meeting, request.OrganizerPassword);
+
         var organizerParticipant = new Participant
         {
             Id = Guid.NewGuid(),
@@ -43,6 +49,7 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             DisplayName = request.OrganizerName.Trim(),
             TimeZone = request.TimeZone,
             ParticipantToken = CreateToken(32),
+            ParticipantPasswordHash = null,
             IsOrganizer = true,
             CreatedAt = now,
             UpdatedAt = now
@@ -113,7 +120,7 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
         return new ParticipantMeeting(meeting, participant);
     }
 
-    public async Task<CreatedParticipant> CreateParticipantAsync(string shortCode, string displayName, string timeZone, CancellationToken cancellationToken = default)
+    public async Task<CreatedParticipant> CreateParticipantAsync(string shortCode, string displayName, string timeZone, string? password = null, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory
             .CreateDbContextAsync(cancellationToken);
@@ -126,6 +133,8 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
 
         if (string.IsNullOrWhiteSpace(displayName) || displayName.Trim().Length > 50)
             throw new ArgumentException("Укажите имя длиной до 50 символов.", nameof(displayName));
+
+        ValidateOptionalPassword(password);
 
         ValidateTimeZone(timeZone);
 
@@ -145,9 +154,59 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             UpdatedAt = now
         };
 
+        if (!string.IsNullOrWhiteSpace(password))
+            participant.ParticipantPasswordHash = ParticipantPasswordHasher.HashPassword(participant, password);
+
         dbContext.Participants.Add(participant);
         await dbContext.SaveChangesAsync(cancellationToken);
         return new CreatedParticipant(participant, participant.ParticipantToken);
+    }
+
+    public async Task<AuthenticatedParticipant> AuthenticateParticipantAsync(string shortCode, string displayName, string password, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var meeting = await dbContext.Meetings
+            .SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken)
+            ?? throw new ArgumentException("Встреча не найдена.", nameof(shortCode));
+
+        ValidateVotingIsOpen(meeting);
+
+        if (string.IsNullOrWhiteSpace(displayName) || string.IsNullOrWhiteSpace(password))
+            throw new UnauthorizedAccessException("Укажите имя и пароль участника.");
+
+        var participant = await dbContext.Participants
+            .SingleOrDefaultAsync(x => x.MeetingId == meeting.Id && x.DisplayName == displayName.Trim(), cancellationToken)
+            ?? throw new UnauthorizedAccessException("Неверное имя или пароль.");
+
+        var passwordIsValid = participant.IsOrganizer
+            ? meeting.OwnerPasswordHash is not null &&
+              MeetingPasswordHasher.VerifyHashedPassword(meeting, meeting.OwnerPasswordHash, password) != PasswordVerificationResult.Failed
+            : participant.ParticipantPasswordHash is not null &&
+              ParticipantPasswordHasher.VerifyHashedPassword(participant, participant.ParticipantPasswordHash, password) != PasswordVerificationResult.Failed;
+
+        if (!passwordIsValid)
+        {
+            throw new UnauthorizedAccessException("Неверное имя или пароль.");
+        }
+
+        return new AuthenticatedParticipant(participant, participant.ParticipantToken);
+    }
+
+    public async Task<AuthenticatedOwner> AuthenticateOwnerAsync(string shortCode, string password, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var meeting = await dbContext.Meetings
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken)
+            ?? throw new ArgumentException("Встреча не найдена.", nameof(shortCode));
+
+        if (string.IsNullOrWhiteSpace(password) || meeting.OwnerPasswordHash is null ||
+            MeetingPasswordHasher.VerifyHashedPassword(meeting, meeting.OwnerPasswordHash, password) == PasswordVerificationResult.Failed)
+        {
+            throw new UnauthorizedAccessException("Неверный пароль организатора.");
+        }
+
+        return new AuthenticatedOwner(meeting, meeting.OwnerToken);
     }
 
     public async Task SaveAvailabilityAsync(string shortCode, string participantToken, IReadOnlyCollection<AvailabilitySelection> selections, CancellationToken cancellationToken = default)
@@ -340,6 +399,8 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
         if (request.Description?.Length > 1000) 
             throw new ArgumentException("Описание не должно превышать 1000 символов.", nameof(request));
 
+        ValidateOptionalPassword(request.OrganizerPassword);
+
         if (string.IsNullOrWhiteSpace(request.OrganizerName) || request.OrganizerName.Trim().Length > 50) 
             throw new ArgumentException("Укажите имя организатора длиной до 50 символов.", nameof(request));
 
@@ -360,6 +421,12 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
 
         if (maximumCellCount > 1500) 
             throw new ArgumentException("Сетка не должна содержать более 1500 ячеек.", nameof(request));
+    }
+
+    private static void ValidateOptionalPassword(string? password)
+    {
+        if (!string.IsNullOrEmpty(password) && password.Length < 4)
+            throw new ArgumentException("Пароль должен содержать минимум 4 символа.", nameof(password));
     }
 
     private static void ValidateTimeZone(string timeZone) 

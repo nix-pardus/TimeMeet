@@ -96,6 +96,31 @@ public sealed class MeetingServicePostgreSqlTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Access_OrganizerCanRestoreParticipantAccessWithOwnerPassword()
+    {
+        var service = new MeetingService(dbContextFactory);
+        var date = new DateOnly(2027, 2, 3);
+        var created = await service.CreateAsync(new CreateMeetingRequest
+        {
+            Title = "Встреча с паролем",
+            OrganizerName = "Организатор",
+            OrganizerPassword = "owner-password",
+            TimeZone = "Europe/Moscow",
+            GridStartDate = date,
+            GridEndDate = date,
+            GridStepMinutes = 60
+        });
+
+        var restored = await service.AuthenticateParticipantAsync(
+            created.Meeting.ShortCode,
+            "Организатор",
+            "owner-password");
+
+        Assert.True(restored.Participant.IsOrganizer);
+        Assert.Equal(created.OrganizerParticipantToken, restored.ParticipantToken);
+    }
+
+    [Fact]
     public async Task CreateMeeting_GeneratesExpectedCellsOnDstDays()
     {
         var springDstDay = new DateOnly(2027, 3, 28);

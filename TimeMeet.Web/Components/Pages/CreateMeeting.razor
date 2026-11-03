@@ -25,6 +25,7 @@
             <MudTextField @bind-Value="model.OrganizerName" Label="Ваше имя" Required="true" For="@(() => model.OrganizerName)" Class="mb-3" />
             <MudTextField @bind-Value="model.Description" Label="Описание" Lines="3" Class="mb-3" />
             <MudTextField @bind-Value="model.TimeZone" Label="Часовой пояс организатора (IANA)" Required="true" HelperText="Например, Europe/Moscow" Class="mb-4" />
+            <MudTextField @bind-Value="model.Password" Label="Пароль организатора (необязательно)" InputType="InputType.Password" HelperText="Минимум 4 символа. Пароль нужен для восстановления доступа." Class="mb-4" />
 
             <MudText Typo="Typo.h6" Class="mb-2">Диапазон свободной сетки</MudText>
             <MudGrid>
@@ -80,7 +81,8 @@
                 GridStartDate = DateOnly.FromDateTime(model.StartDate.Value),
                 GridEndDate = DateOnly.FromDateTime(model.EndDate.Value),
                 GridStepMinutes = model.Step,
-                RetentionMode = model.RetentionMode
+                RetentionMode = model.RetentionMode,
+                OrganizerPassword = string.IsNullOrWhiteSpace(model.Password) ? null : model.Password
             });
 
             Navigation.NavigateTo($"/manage-access/{result.Meeting.ShortCode}?token={Uri.EscapeDataString(result.OwnerToken)}&participantToken={Uri.EscapeDataString(result.OrganizerParticipantToken)}", forceLoad: true);
@@ -97,10 +99,11 @@
 
     private sealed class CreateMeetingModel
     {
-        [Required, StringLength(200)] public string Title { get; set; } = string.Empty;
+        [Required, StringLength(100)] public string Title { get; set; } = string.Empty;
         [Required, StringLength(100)] public string OrganizerName { get; set; } = string.Empty;
         public string? Description { get; set; }
         [Required] public string TimeZone { get; set; } = "Europe/Moscow";
+        public string? Password { get; set; }
         public DateTime? StartDate { get; set; } = DateTime.Today.AddDays(1);
         public DateTime? EndDate { get; set; } = DateTime.Today.AddDays(7);
         public int Step { get; set; } = 30;

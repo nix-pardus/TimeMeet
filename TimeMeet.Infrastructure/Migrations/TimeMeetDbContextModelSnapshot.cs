@@ -17,7 +17,7 @@ namespace TimeMeet.Infrastructure.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -176,6 +176,10 @@ namespace TimeMeet.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("OwnerPasswordHash")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<string>("OwnerToken")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -245,6 +249,10 @@ namespace TimeMeet.Infrastructure.Migrations
 
                     b.Property<Guid>("MeetingId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("ParticipantPasswordHash")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<string>("ParticipantToken")
                         .IsRequired()

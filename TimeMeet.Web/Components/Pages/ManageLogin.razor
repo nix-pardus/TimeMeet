@@ -1,0 +1,65 @@
+@page "/manage-login/{ShortCode}"
+@using System.ComponentModel.DataAnnotations
+@using TimeMeet.Application.Meetings
+@inject IMeetingService MeetingService
+@inject NavigationManager Navigation
+
+<PageTitle>Восстановление доступа — TimeMeet</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small">
+    <MudPaper Class="pa-6" Elevation="2">
+        <MudText Typo="Typo.h5" GutterBottom="true">Доступ организатора</MudText>
+        <MudText Color="Color.Secondary" Class="mb-4">
+            Введите пароль, заданный при создании встречи.
+        </MudText>
+        @if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@errorMessage</MudAlert>
+        }
+        <EditForm Model="model" OnValidSubmit="LoginAsync">
+            <DataAnnotationsValidator />
+            <MudTextField @bind-Value="model.Password"
+                          Label="Пароль"
+                          InputType="InputType.Password"
+                          Required="true" />
+            <MudButton ButtonType="ButtonType.Submit"
+                        Variant="Variant.Filled"
+                        Color="Color.Primary"
+                        Class="mt-4"
+                        Disabled="isBusy">
+                Войти
+            </MudButton>
+        </EditForm>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    [Parameter] public string ShortCode { get; set; } = string.Empty;
+    private readonly LoginModel model = new();
+    private string? errorMessage;
+    private bool isBusy;
+
+    private async Task LoginAsync()
+    {
+        errorMessage = null;
+        isBusy = true;
+        try
+        {
+            var result = await MeetingService.AuthenticateOwnerAsync(ShortCode, model.Password);
+            Navigation.NavigateTo($"/manage-access/{Uri.EscapeDataString(ShortCode)}?token={Uri.EscapeDataString(result.OwnerToken)}", true);
+        }
+        catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private sealed class LoginModel
+    {
+        [Required] public string Password { get; set; } = string.Empty;
+    }
+}
