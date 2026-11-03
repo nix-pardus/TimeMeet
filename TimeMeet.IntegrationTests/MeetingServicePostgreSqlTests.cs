@@ -121,6 +121,37 @@ public sealed class MeetingServicePostgreSqlTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreateParticipant_RejectsDuplicateNameWithinMeeting()
+    {
+        var service = new MeetingService(dbContextFactory);
+        var date = new DateOnly(2027, 2, 4);
+        var created = await service.CreateAsync(CreateRequest(date, date, "Europe/Moscow", 60));
+
+        await service.CreateParticipantAsync(created.Meeting.ShortCode, "Участник", "Europe/Moscow");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CreateParticipantAsync(created.Meeting.ShortCode, " УЧАСТНИК ", "Europe/Moscow"));
+
+        Assert.Contains("уже существует", exception.Message);
+    }
+
+    [Fact]
+    public async Task CreateParticipant_RejectsParticipantCellProductAboveLimit()
+    {
+        var service = new MeetingService(dbContextFactory);
+        var start = new DateOnly(2027, 2, 5);
+        var created = await service.CreateAsync(CreateRequest(start, start.AddDays(41), "Europe/Moscow", 60));
+
+        for (var index = 1; index <= 48; index++)
+            await service.CreateParticipantAsync(created.Meeting.ShortCode, $"Участник {index}", "Europe/Moscow");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CreateParticipantAsync(created.Meeting.ShortCode, "Участник 49", "Europe/Moscow"));
+
+        Assert.Contains("лимит объёма голосования", exception.Message);
+    }
+
+    [Fact]
     public async Task CreateMeeting_GeneratesExpectedCellsOnDstDays()
     {
         var springDstDay = new DateOnly(2027, 3, 28);

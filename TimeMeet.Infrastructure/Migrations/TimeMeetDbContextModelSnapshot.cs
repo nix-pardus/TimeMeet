@@ -158,7 +158,8 @@ namespace TimeMeet.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     b.Property<string>("Description")
-                        .HasColumnType("text");
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<DateOnly>("GridEndDate")
                         .HasColumnType("date");
@@ -174,7 +175,8 @@ namespace TimeMeet.Infrastructure.Migrations
 
                     b.Property<string>("OrganizerName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<string>("OwnerPasswordHash")
                         .HasMaxLength(500)
@@ -207,13 +209,13 @@ namespace TimeMeet.Infrastructure.Migrations
 
                     b.Property<string>("TimeZone")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("Title")
                         .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.HasKey("Id");
 
@@ -239,7 +241,8 @@ namespace TimeMeet.Infrastructure.Migrations
 
                     b.Property<string>("DisplayName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<bool>("HasNoSuitableTime")
                         .HasColumnType("boolean");
@@ -260,7 +263,8 @@ namespace TimeMeet.Infrastructure.Migrations
 
                     b.Property<string>("TimeZone")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -273,6 +277,9 @@ namespace TimeMeet.Infrastructure.Migrations
                     b.HasIndex("ParticipantToken");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("MeetingId", "DisplayName")
+                        .IsUnique();
 
                     b.HasIndex("MeetingId", "ParticipantToken")
                         .IsUnique();
