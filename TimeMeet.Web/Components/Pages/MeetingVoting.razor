@@ -46,17 +46,17 @@
             <MudText Typo="Typo.h6" Class="mb-2">Я здесь впервые</MudText>
             <EditForm Model="participantModel" OnValidSubmit="CreateParticipantAsync">
                 <DataAnnotationsValidator />
-                <MudTextField @bind-Value="participantModel.DisplayName" Label="Ваше имя" Required="true" />
-                <MudTextField @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" />
-                <MudTextField @bind-Value="participantModel.Password" Label="Пароль (необязательно)" InputType="InputType.Password" HelperText="Если указать пароль, доступ можно будет восстановить после потери cookie." />
+                <MudTextField T="string" @bind-Value="participantModel.DisplayName" Label="Ваше имя" Required="true" />
+                <MudTextField T="string" @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" />
+                <MudTextField T="string" @bind-Value="participantModel.Password" Label="Пароль (необязательно)" InputType="InputType.Password" HelperText="Если указать пароль, доступ можно будет восстановить после потери cookie." />
                 <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="mt-4">Продолжить</MudButton>
             </EditForm>
             <MudDivider Class="my-6" />
             <MudText Typo="Typo.h6" Class="mb-2">Восстановить доступ</MudText>
             <EditForm Model="restoreModel" OnValidSubmit="RestoreParticipantAsync">
                 <DataAnnotationsValidator />
-                <MudTextField @bind-Value="restoreModel.DisplayName" Label="Ваше имя" Required="true" />
-                <MudTextField @bind-Value="restoreModel.Password" Label="Пароль" InputType="InputType.Password" Required="true" />
+                <MudTextField T="string" @bind-Value="restoreModel.DisplayName" Label="Ваше имя" Required="true" />
+                <MudTextField T="string" @bind-Value="restoreModel.Password" Label="Пароль" InputType="InputType.Password" Required="true" />
                 <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4">Войти</MudButton>
             </EditForm>
         </MudPaper>
@@ -195,6 +195,10 @@
             }
         </MudPaper>
     }
+    @if (meeting is not null && meeting.Status is not MeetingStatus.Deleted and not MeetingStatus.Archived)
+    {
+        <IntervalAnalysisList Items="intervals" HasVoted="hasVotedParticipants" />
+    }
 </MudContainer>
 
 @code {
@@ -210,6 +214,7 @@
     private bool isLoading = true;
     private bool isSaving;
     private bool hasSavedChanges;
+    private bool analysisLoaded;
     private bool timeZoneInitialized;
     private bool showAll;
     private bool isPainting;
@@ -227,6 +232,7 @@
             .OrderBy(x => x)
             .ToArray();
     private bool hasVotedParticipants => meeting?.Participants.Any(HasVoted) == true;
+    private IReadOnlyCollection<IntervalAnalysis> intervals = [];
     private bool IsCurrentPhaseOpen() => meeting!.Status == MeetingStatus.Active;
 
     protected override async Task OnInitializedAsync()
@@ -238,12 +244,24 @@
         if (participant is not null)
             foreach (var answer in participant.Availabilities)
                 statuses[answer.GridCellId] = answer.Status;
+        await LoadAnalysisAsync();
         isLoading = false;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || timeZoneInitialized || participant is not null) return;
+        if (!firstRender)
+            return;
+
+        if (!analysisLoaded)
+        {
+            await LoadAnalysisAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+
+        if (timeZoneInitialized || participant is not null)
+            return;
+
         timeZoneInitialized = true;
         try
         {
@@ -251,6 +269,22 @@
             await InvokeAsync(StateHasChanged);
         }
         catch (JSException) { }
+    }
+
+    private async Task LoadAnalysisAsync()
+    {
+        if (meeting is null || meeting.Status is MeetingStatus.Deleted or MeetingStatus.Archived)
+            return;
+
+        try
+        {
+            intervals = await MeetingService.AnalyzeIntervalsAsync(ShortCode);
+            analysisLoaded = true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            errorMessage = ex.Message;
+        }
     }
 
     private async Task CreateParticipantAsync()
@@ -358,6 +392,7 @@
             await MeetingService.SetNoSuitableTimeAsync(ShortCode, participant.ParticipantToken, value);
             participant.HasNoSuitableTime = value;
             statuses.Clear();
+            await LoadAnalysisAsync();
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
         {
@@ -381,6 +416,7 @@
                 statuses.Select(x => new AvailabilitySelection(x.Key, x.Value)).ToArray(),
                 ct
             );
+            intervals = await MeetingService.AnalyzeIntervalsAsync(ShortCode, ct);
             hasSavedChanges = true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }

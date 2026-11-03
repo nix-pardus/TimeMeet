@@ -132,7 +132,7 @@ public sealed class MeetingServicePostgreSqlTests : IAsyncLifetime
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.CreateParticipantAsync(created.Meeting.ShortCode, " УЧАСТНИК ", "Europe/Moscow"));
 
-        Assert.Contains("уже существует", exception.Message);
+        Assert.Equal("Это имя уже используется. Добавьте фамилию или инициал.", exception.Message);
     }
 
     [Fact]
@@ -149,6 +149,42 @@ public sealed class MeetingServicePostgreSqlTests : IAsyncLifetime
             service.CreateParticipantAsync(created.Meeting.ShortCode, "Участник 49", "Europe/Moscow"));
 
         Assert.Contains("лимит объёма голосования", exception.Message);
+    }
+
+    [Fact]
+    public async Task AnalyzeIntervals_BuildsContinuousIntervalsAndIsPublic()
+    {
+        var service = new MeetingService(dbContextFactory);
+        var date = new DateOnly(2027, 2, 6);
+        var created = await service.CreateAsync(CreateRequest(date, date, "Europe/Moscow", 60));
+        var participant = await service.CreateParticipantAsync(created.Meeting.ShortCode, "Участник", "Europe/Moscow");
+
+        await service.SaveAvailabilityAsync(
+            created.Meeting.ShortCode,
+            created.OrganizerParticipantToken,
+            [
+                new AvailabilitySelection(created.Meeting.GridCells.ElementAt(10).Id, AvailabilityStatus.Available),
+                new AvailabilitySelection(created.Meeting.GridCells.ElementAt(11).Id, AvailabilityStatus.Available),
+                new AvailabilitySelection(created.Meeting.GridCells.ElementAt(12).Id, AvailabilityStatus.Available)]);
+        await service.SaveAvailabilityAsync(
+            created.Meeting.ShortCode,
+            participant.ParticipantToken,
+            [
+                new AvailabilitySelection(created.Meeting.GridCells.ElementAt(10).Id, AvailabilityStatus.IfNeeded),
+                new AvailabilitySelection(created.Meeting.GridCells.ElementAt(11).Id, AvailabilityStatus.IfNeeded),
+                new AvailabilitySelection(created.Meeting.GridCells.ElementAt(12).Id, AvailabilityStatus.Available)]);
+
+        var intervals = await service.AnalyzeIntervalsAsync(created.Meeting.ShortCode);
+
+        var interval = Assert.Single(intervals);
+        Assert.Equal(created.Meeting.GridCells.ElementAt(10).StartTime, interval.StartTime);
+        Assert.Equal(created.Meeting.GridCells.ElementAt(12).EndTime, interval.EndTime);
+        Assert.Equal(1, interval.AvailableCount);
+        Assert.Equal(1, interval.IfNeededCount);
+        Assert.Equal(0, interval.CannotCount);
+        Assert.Contains("Организатор", interval.AvailableNames);
+        Assert.Contains("Участник", interval.IfNeededNames);
+        Assert.Equal(3, interval.ParticipantBreakdown.Count);
     }
 
     [Fact]
