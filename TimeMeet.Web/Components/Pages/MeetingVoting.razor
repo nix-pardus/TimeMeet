@@ -43,7 +43,22 @@
     {
         <MudPaper Class="pa-6">
             <MudText Typo="Typo.h4">@meeting.Title</MudText><MudText Class="mb-4">Организатор: @meeting.OrganizerName</MudText>
-            <EditForm Model="participantModel" OnValidSubmit="CreateParticipantAsync"><DataAnnotationsValidator /><MudTextField @bind-Value="participantModel.DisplayName" Label="Ваше имя" Required="true" /><MudTextField @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" /><MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="mt-4">Продолжить</MudButton></EditForm>
+            <MudText Typo="Typo.h6" Class="mb-2">Я здесь впервые</MudText>
+            <EditForm Model="participantModel" OnValidSubmit="CreateParticipantAsync">
+                <DataAnnotationsValidator />
+                <MudTextField @bind-Value="participantModel.DisplayName" Label="Ваше имя" Required="true" />
+                <MudTextField @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" />
+                <MudTextField @bind-Value="participantModel.Password" Label="Пароль (необязательно)" InputType="InputType.Password" HelperText="Если указать пароль, доступ можно будет восстановить после потери cookie." />
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="mt-4">Продолжить</MudButton>
+            </EditForm>
+            <MudDivider Class="my-6" />
+            <MudText Typo="Typo.h6" Class="mb-2">Восстановить доступ</MudText>
+            <EditForm Model="restoreModel" OnValidSubmit="RestoreParticipantAsync">
+                <DataAnnotationsValidator />
+                <MudTextField @bind-Value="restoreModel.DisplayName" Label="Ваше имя" Required="true" />
+                <MudTextField @bind-Value="restoreModel.Password" Label="Пароль" InputType="InputType.Password" Required="true" />
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4">Войти</MudButton>
+            </EditForm>
         </MudPaper>
     }
     else if (meeting is not null && participant is not null)
@@ -189,6 +204,7 @@
     private Meeting? meeting;
     private Participant? participant;
     private readonly ParticipantModel participantModel = new();
+    private readonly RestoreParticipantModel restoreModel = new();
     private readonly Dictionary<Guid, AvailabilityStatus> statuses = [];
     private CancellationTokenSource? saveCancellation;
     private bool isLoading = true;
@@ -241,10 +257,23 @@
     {
         try
         {
-            var result = await MeetingService.CreateParticipantAsync(ShortCode, participantModel.DisplayName, participantModel.TimeZone);
+            var result = await MeetingService.CreateParticipantAsync(ShortCode, participantModel.DisplayName, participantModel.TimeZone, participantModel.Password);
             Navigation.NavigateTo($"/participant-access/{Uri.EscapeDataString(ShortCode)}?token={Uri.EscapeDataString(result.ParticipantToken)}", true);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task RestoreParticipantAsync()
+    {
+        try
+        {
+            var result = await MeetingService.AuthenticateParticipantAsync(ShortCode, restoreModel.DisplayName, restoreModel.Password);
+            Navigation.NavigateTo($"/participant-access/{Uri.EscapeDataString(ShortCode)}?token={Uri.EscapeDataString(result.ParticipantToken)}", true);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
         {
             errorMessage = ex.Message;
         }
@@ -496,5 +525,12 @@
     {
         [Required] public string DisplayName { get; set; } = string.Empty; 
         [Required] public string TimeZone { get; set; } = "Europe/Moscow"; 
+        public string? Password { get; set; }
+    }
+
+    private sealed class RestoreParticipantModel
+    {
+        [Required] public string DisplayName { get; set; } = string.Empty;
+        [Required] public string Password { get; set; } = string.Empty;
     }
 }

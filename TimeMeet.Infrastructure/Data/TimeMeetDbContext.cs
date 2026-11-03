@@ -25,6 +25,7 @@ public sealed class TimeMeetDbContext(DbContextOptions<TimeMeetDbContext> option
         modelBuilder.Entity<Meeting>().HasQueryFilter(x => x.Status != Domain.Enums.MeetingStatus.Archived && x.Status != Domain.Enums.MeetingStatus.Deleted);
         modelBuilder.Entity<Meeting>().Property(x => x.ShortCode).HasMaxLength(10);
         modelBuilder.Entity<Meeting>().Property(x => x.OwnerToken).HasMaxLength(64);
+        modelBuilder.Entity<Meeting>().Property(x => x.OwnerPasswordHash).HasMaxLength(500);
         modelBuilder.Entity<Meeting>().Property(x => x.Title).HasMaxLength(200);
         modelBuilder.Entity<Meeting>().Property(x => x.TimeZone).HasMaxLength(100);
         modelBuilder.Entity<Meeting>().Property(x => x.DeletionReason).HasConversion<int>();
@@ -38,6 +39,7 @@ public sealed class TimeMeetDbContext(DbContextOptions<TimeMeetDbContext> option
         modelBuilder.Entity<Participant>().HasKey(x => x.Id);
         modelBuilder.Entity<Participant>().HasIndex(x => new { x.MeetingId, x.ParticipantToken }).IsUnique();
         modelBuilder.Entity<Participant>().HasIndex(x => x.ParticipantToken);
+        modelBuilder.Entity<Participant>().Property(x => x.ParticipantPasswordHash).HasMaxLength(500);
         modelBuilder.Entity<Participant>().HasOne(x => x.Meeting).WithMany(x => x.Participants).HasForeignKey(x => x.MeetingId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Participant>().HasOne(x => x.User).WithMany(x => x.Participations).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.SetNull);
 
