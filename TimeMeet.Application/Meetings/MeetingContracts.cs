@@ -23,6 +23,25 @@ public sealed record AuthenticatedParticipant(Participant Participant, string Pa
 public sealed record AuthenticatedOwner(Meeting Meeting, string OwnerToken);
 public sealed record AvailabilitySelection(Guid TargetId, AvailabilityStatus Status);
 
+public sealed record ParticipantBreakdown(
+    string Name,
+    string Status,
+    DateTimeOffset From,
+    DateTimeOffset To);
+
+public sealed record IntervalAnalysis(
+    DateTimeOffset StartTime,
+    DateTimeOffset EndTime,
+    TimeSpan Duration,
+    IReadOnlyCollection<string> AvailableNames,
+    IReadOnlyCollection<string> IfNeededNames,
+    IReadOnlyCollection<string> CannotNames,
+    int AvailableCount,
+    int IfNeededCount,
+    int CannotCount,
+    IReadOnlyCollection<ParticipantBreakdown> ParticipantBreakdown);
+
+// Оставлен для обратной совместимости с существующими интеграционными тестами.
 public sealed record GridCellAnalysis(
     GridCell Cell,
     int AvailableCount,
@@ -53,6 +72,7 @@ public interface IMeetingService
     Task<AuthenticatedOwner> AuthenticateOwnerAsync(string shortCode, string password, CancellationToken cancellationToken = default);
     Task SaveAvailabilityAsync(string shortCode, string participantToken, IReadOnlyCollection<AvailabilitySelection> selections, CancellationToken cancellationToken = default);
     Task SetNoSuitableTimeAsync(string shortCode, string participantToken, bool value, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<IntervalAnalysis>> AnalyzeIntervalsAsync(string shortCode, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<GridCellAnalysis>> AnalyzeAvailabilityAsync(string shortCode, string ownerToken, CancellationToken cancellationToken = default);
     Task CloseAsync(string shortCode, string ownerToken, DateTimeOffset? selectedStartTime, DateTimeOffset? selectedEndTime, CancellationToken cancellationToken = default);
     Task ArchiveAsync(string shortCode, string ownerToken, CancellationToken cancellationToken = default);

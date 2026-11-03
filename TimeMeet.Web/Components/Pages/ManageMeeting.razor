@@ -52,39 +52,10 @@
                     Найти лучшие интервалы
                 </MudButton>
 
-                @if (analysis.Count > 0)
-                {
-                    <MudTable Items="analysis"
-                              Hover="true"
-                              Dense="true"
-                              Class="mt-2">
-                        <HeaderContent>
-                            <MudTh>Время</MudTh>
-                            <MudTh>Доступны</MudTh>
-                            <MudTh>Если нужно</MudTh>
-                            <MudTh>Не могут</MudTh>
-                            <MudTh>Оценка</MudTh>
-                            <MudTh>Действие</MudTh>
-                        </HeaderContent>
-                        <RowTemplate>
-                            <MudTd>
-                                @Format(context.Cell.StartTime) — @Format(context.Cell.EndTime)
-                            </MudTd>
-                            <MudTd>@context.AvailableCount</MudTd>
-                            <MudTd>@context.IfNeededCount</MudTd>
-                            <MudTd>@context.CannotCount</MudTd>
-                            <MudTd>@context.Score</MudTd>
-                            <MudTd>
-                                <MudButton Size="Size.Small"
-                                           Color="Color.Success"
-                                           OnClick="@(() => CloseWithCellAsync(context.Cell))"
-                                           Disabled="isBusy">
-                                    Выбрать
-                                </MudButton>
-                            </MudTd>
-                        </RowTemplate>
-                    </MudTable>
-                }
+                <IntervalAnalysisList Items="analysis"
+                                      HasVoted="@(meeting.Participants.Any(x => x.HasNoSuitableTime || x.Availabilities.Count > 0))"
+                                      ShowCloseButton="true"
+                                      OnClose="CloseWithIntervalAsync" />
 
                 <MudButton Class="mt-3"
                            Variant="Variant.Outlined"
@@ -162,7 +133,7 @@
     public string ShortCode { get; set; } = string.Empty;
 
     private Meeting? meeting;
-    private IReadOnlyCollection<GridCellAnalysis> analysis = [];
+    private IReadOnlyCollection<IntervalAnalysis> analysis = [];
     private bool isLoading = true;
     private bool isBusy;
     private string? errorMessage;
@@ -197,10 +168,18 @@
         {
             errorMessage = "Встреча не найдена или доступ организатора недействителен.";
         }
-
         await RefreshQrCodeAsync();
 
         isLoading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || meeting is null)
+            return;
+
+        analysis = await MeetingService.AnalyzeIntervalsAsync(ShortCode);
+        await InvokeAsync(StateHasChanged);
     }
 
     private Task RefreshQrCodeAsync()
@@ -226,7 +205,7 @@
         try
         {
             isBusy = true;
-            analysis = await MeetingService.AnalyzeAvailabilityAsync(ShortCode, ownerToken!);
+            analysis = await MeetingService.AnalyzeIntervalsAsync(ShortCode);
         }
         catch (Exception ex) when (
             ex is ArgumentException
@@ -275,8 +254,8 @@
         }
     }
 
-    private Task CloseWithCellAsync(GridCell cell) =>
-        CloseAsync(cell.StartTime, cell.EndTime);
+    private Task CloseWithIntervalAsync(IntervalAnalysis interval) =>
+        CloseAsync(interval.StartTime, interval.EndTime);
 
     private Task CloseWithoutSelectionAsync() =>
         CloseAsync(null, null);

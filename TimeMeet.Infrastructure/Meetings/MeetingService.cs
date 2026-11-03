@@ -154,7 +154,7 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
                 x => x.MeetingId == meeting.Id && x.DisplayName.ToUpper() == normalizedDisplayNameForComparison,
                 cancellationToken))
         {
-            throw new InvalidOperationException("Участник с таким именем уже существует в этой встрече.");
+            throw new InvalidOperationException("Это имя уже используется. Добавьте фамилию или инициал.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -181,7 +181,7 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
         catch (DbUpdateException exception) when (exception.InnerException is PostgresException
             { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_Participants_MeetingId_DisplayName" })
         {
-            throw new InvalidOperationException("Участник с таким именем уже существует в этой встрече.", exception);
+            throw new InvalidOperationException("Это имя уже используется. Добавьте фамилию или инициал.", exception);
         }
         return new CreatedParticipant(participant, participant.ParticipantToken);
     }
@@ -388,6 +388,127 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             .ThenBy(x => x.Cell.StartTime)
             .ToArray();
     }
+
+    public async Task<IReadOnlyCollection<IntervalAnalysis>> AnalyzeIntervalsAsync(
+        string shortCode,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var meeting = await dbContext.Meetings
+            .Include(x => x.GridCells)
+            .ThenInclude(x => x.Availabilities)
+            .Include(x => x.Participants)
+            .ThenInclude(x => x.Availabilities)
+            .SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken)
+            ?? throw new ArgumentException("Встреча не найдена.", nameof(shortCode));
+
+        var voted = meeting.Participants
+            .Where(x => x.HasNoSuitableTime || x.Availabilities.Count > 0)
+            .ToArray();
+        if (voted.Length == 0)
+            return [];
+
+        var cells = meeting.GridCells.OrderBy(x => x.StartTime).ToArray();
+        var intervals = new List<(GridCell Start, GridCell End)>();
+        GridCell? start = null;
+        GridCell? end = null;
+
+        foreach (var cell in cells)
+        {
+            var isLive = cell.Availabilities.Any(x => voted.Any(p => p.Id == x.ParticipantId));
+            if (isLive)
+            {
+                start ??= cell;
+                end = cell;
+            }
+            else if (start is not null)
+            {
+                intervals.Add((start, end!));
+                start = null;
+                end = null;
+            }
+        }
+
+        if (start is not null)
+            intervals.Add((start, end!));
+
+        var result = intervals
+            .Select(interval => BuildIntervalAnalysis(interval.Start, interval.End, cells, voted))
+            .Where(x => x.AvailableCount > 0 || x.IfNeededCount > 0)
+            .Select(x => new { Analysis = x, Group = GetIntervalGroup(x) })
+            .OrderBy(x => x.Group)
+            .ThenBy(x => x.Group == 1 ? 0 : x.Analysis.IfNeededCount)
+            .ThenBy(x => x.Group is 3 or 4 ? x.Analysis.CannotCount : 0)
+            .ThenBy(x => x.Analysis.StartTime)
+            .Select(x => x.Analysis)
+            .ToArray();
+
+        return result;
+    }
+
+    private static IntervalAnalysis BuildIntervalAnalysis(
+        GridCell start,
+        GridCell end,
+        IReadOnlyCollection<GridCell> allCells,
+        IReadOnlyCollection<Participant> voted)
+    {
+        var cells = allCells.Where(x => x.StartTime >= start.StartTime && x.EndTime <= end.EndTime).ToArray();
+        var available = new List<string>();
+        var ifNeeded = new List<string>();
+        var cannot = new List<string>();
+        var breakdown = new List<ParticipantBreakdown>();
+
+        foreach (var participant in voted)
+        {
+            var segments = new List<(string Status, DateTimeOffset From, DateTimeOffset To)>();
+            foreach (var cell in cells)
+            {
+                var answer = participant.Availabilities.FirstOrDefault(x => x.GridCellId == cell.Id);
+                var status = answer?.Status switch
+                {
+                    AvailabilityStatus.Available => "Available",
+                    AvailabilityStatus.IfNeeded => "IfNeeded",
+                    _ => "Cannot"
+                };
+
+                if (segments.Count > 0 && segments[^1].Status == status && segments[^1].To == cell.StartTime)
+                {
+                    var previous = segments[^1];
+                    segments[^1] = (previous.Status, previous.From, cell.EndTime);
+                }
+                else
+                {
+                    segments.Add((status, cell.StartTime, cell.EndTime));
+                }
+            }
+
+            var worstStatus = segments.Any(x => x.Status == "Cannot")
+                ? "Cannot"
+                : segments.Any(x => x.Status == "IfNeeded") ? "IfNeeded" : "Available";
+            if (worstStatus == "Available") available.Add(participant.DisplayName);
+            else if (worstStatus == "IfNeeded") ifNeeded.Add(participant.DisplayName);
+            else cannot.Add(participant.DisplayName);
+
+            breakdown.AddRange(segments.Select(x => new ParticipantBreakdown(participant.DisplayName, x.Status, x.From, x.To)));
+        }
+
+        return new IntervalAnalysis(
+            start.StartTime,
+            end.EndTime,
+            end.EndTime - start.StartTime,
+            available,
+            ifNeeded,
+            cannot,
+            available.Count,
+            ifNeeded.Count,
+            cannot.Count,
+            breakdown);
+    }
+
+    private static int GetIntervalGroup(IntervalAnalysis analysis) =>
+        analysis.CannotCount == 0
+            ? (analysis.IfNeededCount == 0 ? 1 : 2)
+            : (analysis.AvailableCount > 0 ? 3 : 4);
 
     public async Task CloseAsync(string shortCode, string ownerToken, DateTimeOffset? selectedStartTime, DateTimeOffset? selectedEndTime, CancellationToken cancellationToken = default)
     {
