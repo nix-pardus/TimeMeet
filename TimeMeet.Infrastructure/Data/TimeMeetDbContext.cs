@@ -26,8 +26,10 @@ public sealed class TimeMeetDbContext(DbContextOptions<TimeMeetDbContext> option
         modelBuilder.Entity<Meeting>().Property(x => x.ShortCode).HasMaxLength(10);
         modelBuilder.Entity<Meeting>().Property(x => x.OwnerToken).HasMaxLength(64);
         modelBuilder.Entity<Meeting>().Property(x => x.OwnerPasswordHash).HasMaxLength(500);
-        modelBuilder.Entity<Meeting>().Property(x => x.Title).HasMaxLength(200);
-        modelBuilder.Entity<Meeting>().Property(x => x.TimeZone).HasMaxLength(100);
+        modelBuilder.Entity<Meeting>().Property(x => x.Title).HasMaxLength(100);
+        modelBuilder.Entity<Meeting>().Property(x => x.Description).HasMaxLength(1000);
+        modelBuilder.Entity<Meeting>().Property(x => x.OrganizerName).HasMaxLength(50);
+        modelBuilder.Entity<Meeting>().Property(x => x.TimeZone).HasMaxLength(64);
         modelBuilder.Entity<Meeting>().Property(x => x.DeletionReason).HasConversion<int>();
         modelBuilder.Entity<Meeting>().HasOne(x => x.Organizer).WithMany(x => x.Meetings).HasForeignKey(x => x.OrganizerId).OnDelete(DeleteBehavior.SetNull);
 
@@ -38,8 +40,11 @@ public sealed class TimeMeetDbContext(DbContextOptions<TimeMeetDbContext> option
 
         modelBuilder.Entity<Participant>().HasKey(x => x.Id);
         modelBuilder.Entity<Participant>().HasIndex(x => new { x.MeetingId, x.ParticipantToken }).IsUnique();
+        modelBuilder.Entity<Participant>().HasIndex(x => new { x.MeetingId, x.DisplayName }).IsUnique();
         modelBuilder.Entity<Participant>().HasIndex(x => x.ParticipantToken);
         modelBuilder.Entity<Participant>().Property(x => x.ParticipantPasswordHash).HasMaxLength(500);
+        modelBuilder.Entity<Participant>().Property(x => x.DisplayName).HasMaxLength(50);
+        modelBuilder.Entity<Participant>().Property(x => x.TimeZone).HasMaxLength(64);
         modelBuilder.Entity<Participant>().HasOne(x => x.Meeting).WithMany(x => x.Participants).HasForeignKey(x => x.MeetingId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Participant>().HasOne(x => x.User).WithMany(x => x.Participations).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.SetNull);
 

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
+using Npgsql;
 using TimeMeet.Application.Meetings;
 using TimeMeet.Domain.Entities;
 using TimeMeet.Domain.Enums;
@@ -11,6 +12,7 @@ namespace TimeMeet.Infrastructure.Meetings;
 public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContextFactory) : IMeetingService
 {
     private const string Base62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    private const int MaxParticipantCellCount = 50_000;
     private static readonly PasswordHasher<Meeting> MeetingPasswordHasher = new();
     private static readonly PasswordHasher<Participant> ParticipantPasswordHasher = new();
 
@@ -141,13 +143,27 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
         if (await dbContext.Participants.CountAsync(x => x.MeetingId == meeting.Id, cancellationToken) >= 100)
             throw new InvalidOperationException("Достигнут лимит участников встречи.");
 
+        var cellCount = await dbContext.GridCells.CountAsync(x => x.MeetingId == meeting.Id, cancellationToken);
+        var participantCount = await dbContext.Participants.CountAsync(x => x.MeetingId == meeting.Id, cancellationToken);
+        if ((long)(participantCount + 1) * cellCount > MaxParticipantCellCount)
+            throw new InvalidOperationException("Превышен лимит объёма голосования для этой встречи.");
+
+        var normalizedDisplayName = displayName.Trim();
+        var normalizedDisplayNameForComparison = normalizedDisplayName.ToUpperInvariant();
+        if (await dbContext.Participants.AnyAsync(
+                x => x.MeetingId == meeting.Id && x.DisplayName.ToUpper() == normalizedDisplayNameForComparison,
+                cancellationToken))
+        {
+            throw new InvalidOperationException("Участник с таким именем уже существует в этой встрече.");
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         var participant = new Participant
         {
             Id = Guid.NewGuid(),
             MeetingId = meeting.Id,
-            DisplayName = displayName.Trim(),
+            DisplayName = normalizedDisplayName,
             TimeZone = timeZone,
             ParticipantToken = CreateToken(32),
             CreatedAt = now,
@@ -158,7 +174,15 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             participant.ParticipantPasswordHash = ParticipantPasswordHasher.HashPassword(participant, password);
 
         dbContext.Participants.Add(participant);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_Participants_MeetingId_DisplayName" })
+        {
+            throw new InvalidOperationException("Участник с таким именем уже существует в этой встрече.", exception);
+        }
         return new CreatedParticipant(participant, participant.ParticipantToken);
     }
 

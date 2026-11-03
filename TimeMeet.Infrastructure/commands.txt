@@ -2,4 +2,4 @@
 dotnet ef database update --project TimeMeet.Infrastructure --startup-project TimeMeet.Web
 
 dotnet ef migrations add RemoveGridTimeBoundsAndGenerateFullDays
-dotnet ef migrations add AddPasswordAccess
+dotnet ef migrations add EnforceParticipantLimitsAndUniqueNames
