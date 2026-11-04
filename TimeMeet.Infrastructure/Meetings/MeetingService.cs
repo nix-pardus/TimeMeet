@@ -435,32 +435,11 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
         if (commonStart is not null)
             commonIntervals.Add((commonStart, commonEnd!));
 
-        var liveIntervals = new List<(GridCell Start, GridCell End)>();
-        GridCell? start = null;
-        GridCell? end = null;
-
-        foreach (var cell in cells)
-        {
-            var isLive = cell.Availabilities.Any(x => voted.Any(p => p.Id == x.ParticipantId));
-            if (isLive)
-            {
-                start ??= cell;
-                end = cell;
-            }
-            else if (start is not null)
-            {
-                liveIntervals.Add((start, end!));
-                start = null;
-                end = null;
-            }
-        }
-
-        if (start is not null)
-            liveIntervals.Add((start, end!));
+        var alternativeIntervals = BuildAlternativeIntervals(cells, voted);
 
         var commonResults = commonIntervals
             .Select(interval => BuildIntervalAnalysis(interval.Start, interval.End, cells, voted, true));
-        var alternativeResults = liveIntervals
+        var alternativeResults = alternativeIntervals
             .Select(interval => BuildIntervalAnalysis(interval.Start, interval.End, cells, voted))
             .Where(x => !commonIntervals.Any(common => common.Start.StartTime == x.StartTime && common.End.EndTime == x.EndTime));
 
@@ -478,6 +457,58 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             .ToArray();
 
         return result;
+    }
+
+    private static IReadOnlyCollection<(GridCell Start, GridCell End)> BuildAlternativeIntervals(
+        IReadOnlyCollection<GridCell> cells,
+        IReadOnlyCollection<Participant> voted)
+    {
+        var intervals = new List<(GridCell Start, GridCell End)>();
+        GridCell? start = null;
+        GridCell? end = null;
+        string? activeParticipants = null;
+
+        void CompleteInterval()
+        {
+            if (start is not null)
+                intervals.Add((start, end!));
+
+            start = null;
+            end = null;
+            activeParticipants = null;
+        }
+
+        foreach (var cell in cells.OrderBy(x => x.StartTime))
+        {
+            var currentActiveParticipants = string.Join(",", voted.Select(participant =>
+                participant.Availabilities.Any(x =>
+                    x.GridCellId == cell.Id &&
+                    x.Status is AvailabilityStatus.Available or AvailabilityStatus.IfNeeded)
+                    ? "1"
+                    : "0"));
+
+            if (currentActiveParticipants.All(value => value == '0'))
+            {
+                CompleteInterval();
+                continue;
+            }
+
+            if (start is not null &&
+                activeParticipants == currentActiveParticipants &&
+                end!.EndTime == cell.StartTime)
+            {
+                end = cell;
+                continue;
+            }
+
+            CompleteInterval();
+            start = cell;
+            end = cell;
+            activeParticipants = currentActiveParticipants;
+        }
+
+        CompleteInterval();
+        return intervals;
     }
 
     private static IntervalAnalysis BuildIntervalAnalysis(

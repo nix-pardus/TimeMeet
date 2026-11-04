@@ -210,7 +210,13 @@ public sealed class MeetingServicePostgreSqlTests : IAsyncLifetime
         var intervals = (await service.AnalyzeIntervalsAsync(created.Meeting.ShortCode)).ToArray();
 
         Assert.Equal(2, intervals.Length);
-        Assert.True(intervals[0].Duration > intervals[1].Duration);
+
+        var alternative = Assert.Single(intervals.Where(x => !x.IsCommonAvailability));
+        Assert.Equal(created.Meeting.GridCells.ElementAt(0).StartTime, alternative.StartTime);
+        Assert.Equal(created.Meeting.GridCells.ElementAt(0).EndTime, alternative.EndTime);
+        Assert.Equal(1, alternative.AvailableCount);
+        Assert.Equal(0, alternative.IfNeededCount);
+        Assert.Equal(1, alternative.CannotCount);
 
         var interval = Assert.Single(intervals.Where(x => x.IsCommonAvailability));
         Assert.Equal(created.Meeting.GridCells.ElementAt(1).StartTime, interval.StartTime);
@@ -218,6 +224,62 @@ public sealed class MeetingServicePostgreSqlTests : IAsyncLifetime
         Assert.Equal(2, interval.AvailableCount);
         Assert.Equal(0, interval.IfNeededCount);
         Assert.Equal(0, interval.CannotCount);
+    }
+
+    [Fact]
+    public async Task AnalyzeIntervals_IncludesAlternativesWithIfNeededAvailability()
+    {
+        var service = new MeetingService(dbContextFactory);
+        var created = await service.CreateAsync(CreateRequest(
+            new DateOnly(2026, 11, 7),
+            new DateOnly(2026, 11, 8),
+            "Europe/Moscow",
+            30));
+        var second = await service.CreateParticipantAsync(created.Meeting.ShortCode, "Участник 2", "Europe/Moscow");
+        var third = await service.CreateParticipantAsync(created.Meeting.ShortCode, "Участник 3", "Europe/Moscow");
+
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Moscow");
+        var cells = created.Meeting.GridCells.ToArray();
+
+        static DateTime Local(DateOnly date, TimeSpan time) => date.ToDateTime(TimeOnly.FromTimeSpan(time));
+
+        AvailabilitySelection[] Select(DateTime from, DateTime to, AvailabilityStatus status) =>
+            cells
+                .Where(cell =>
+                {
+                    var start = TimeZoneInfo.ConvertTime(cell.StartTime, timeZone).DateTime;
+                    var end = TimeZoneInfo.ConvertTime(cell.EndTime, timeZone).DateTime;
+                    return start >= from && end <= to;
+                })
+                .Select(cell => new AvailabilitySelection(cell.Id, status))
+                .ToArray();
+
+        await service.SaveAvailabilityAsync(
+            created.Meeting.ShortCode,
+            created.OrganizerParticipantToken,
+            Select(Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(17)), Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(3)), AvailabilityStatus.Available)
+                .Concat(Select(Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(17)), Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(23)), AvailabilityStatus.Available))
+                .ToArray());
+        await service.SaveAvailabilityAsync(
+            created.Meeting.ShortCode,
+            second.ParticipantToken,
+            Select(Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(15)), Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(23)), AvailabilityStatus.Available)
+                .Concat(Select(Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(16)), Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(22)), AvailabilityStatus.Available))
+                .ToArray());
+        await service.SaveAvailabilityAsync(
+            created.Meeting.ShortCode,
+            third.ParticipantToken,
+            Select(Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(13)), Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(18)), AvailabilityStatus.Available)
+                .Concat(Select(Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(18)), Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(20)), AvailabilityStatus.IfNeeded))
+                .Concat(Select(Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(15.5)), Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(21)), AvailabilityStatus.IfNeeded))
+                .ToArray());
+
+        var intervals = (await service.AnalyzeIntervalsAsync(created.Meeting.ShortCode)).ToArray();
+
+        Assert.Contains(intervals, interval =>
+            !interval.IsCommonAvailability &&
+            interval.IfNeededCount > 0 &&
+            interval.StartTime < interval.EndTime);
     }
 
     [Fact]
