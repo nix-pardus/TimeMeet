@@ -409,7 +409,33 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             return [];
 
         var cells = meeting.GridCells.OrderBy(x => x.StartTime).ToArray();
-        var intervals = new List<(GridCell Start, GridCell End)>();
+        var commonIntervals = new List<(GridCell Start, GridCell End)>();
+        GridCell? commonStart = null;
+        GridCell? commonEnd = null;
+
+        foreach (var cell in cells)
+        {
+            var isCommonlyAvailable = voted.All(participant =>
+                participant.Availabilities.Any(x =>
+                    x.GridCellId == cell.Id && x.Status == AvailabilityStatus.Available));
+
+            if (isCommonlyAvailable)
+            {
+                commonStart ??= cell;
+                commonEnd = cell;
+            }
+            else if (commonStart is not null)
+            {
+                commonIntervals.Add((commonStart, commonEnd!));
+                commonStart = null;
+                commonEnd = null;
+            }
+        }
+
+        if (commonStart is not null)
+            commonIntervals.Add((commonStart, commonEnd!));
+
+        var liveIntervals = new List<(GridCell Start, GridCell End)>();
         GridCell? start = null;
         GridCell? end = null;
 
@@ -423,20 +449,28 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             }
             else if (start is not null)
             {
-                intervals.Add((start, end!));
+                liveIntervals.Add((start, end!));
                 start = null;
                 end = null;
             }
         }
 
         if (start is not null)
-            intervals.Add((start, end!));
+            liveIntervals.Add((start, end!));
 
-        var result = intervals
+        var commonResults = commonIntervals
+            .Select(interval => BuildIntervalAnalysis(interval.Start, interval.End, cells, voted, true));
+        var alternativeResults = liveIntervals
             .Select(interval => BuildIntervalAnalysis(interval.Start, interval.End, cells, voted))
+            .Where(x => !commonIntervals.Any(common => common.Start.StartTime == x.StartTime && common.End.EndTime == x.EndTime));
+
+        var result = commonResults
+            .Concat(alternativeResults)
             .Where(x => x.AvailableCount > 0 || x.IfNeededCount > 0)
             .Select(x => new { Analysis = x, Group = GetIntervalGroup(x) })
-            .OrderBy(x => x.Group)
+            .OrderByDescending(x => x.Analysis.Duration)
+            .ThenBy(x => x.Analysis.IsCommonAvailability ? 0 : 1)
+            .ThenBy(x => x.Group)
             .ThenBy(x => x.Group == 1 ? 0 : x.Analysis.IfNeededCount)
             .ThenBy(x => x.Group is 3 or 4 ? x.Analysis.CannotCount : 0)
             .ThenBy(x => x.Analysis.StartTime)
@@ -450,7 +484,8 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
         GridCell start,
         GridCell end,
         IReadOnlyCollection<GridCell> allCells,
-        IReadOnlyCollection<Participant> voted)
+        IReadOnlyCollection<Participant> voted,
+        bool isCommonAvailability = false)
     {
         var cells = allCells.Where(x => x.StartTime >= start.StartTime && x.EndTime <= end.EndTime).ToArray();
         var available = new List<string>();
@@ -502,7 +537,8 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             available.Count,
             ifNeeded.Count,
             cannot.Count,
-            breakdown);
+            breakdown,
+            isCommonAvailability);
     }
 
     private static int GetIntervalGroup(IntervalAnalysis analysis) =>

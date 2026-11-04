@@ -19,7 +19,20 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var item in Items)
+                @foreach (var item in Items.Where(x => x.IsCommonAvailability))
+                {
+                    <tr @onclick="@(() => Select(item))" style="cursor:pointer">
+                        <td>@Format(item.StartTime)</td>
+                        <td>@Format(item.EndTime)</td>
+                        <td>@FormatDuration(item.Duration)</td>
+                        <td>@FormatAvailability(item)</td>
+                    </tr>
+                }
+                @if (Items.Any(x => x.IsCommonAvailability) && Items.Any(x => !x.IsCommonAvailability))
+                {
+                    <tr><td colspan="4"><b>Альтернативные интервалы</b></td></tr>
+                }
+                @foreach (var item in Items.Where(x => !x.IsCommonAvailability))
                 {
                     <tr @onclick="@(() => Select(item))" style="cursor:pointer">
                         <td>@Format(item.StartTime)</td>
