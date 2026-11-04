@@ -9,9 +9,9 @@
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudPaper Class="pa-6" Elevation="2">
-        <MudText Typo="Typo.h4" GutterBottom="true">Создать встречу</MudText>
-            <MudText Color="Color.Secondary" Class="mb-5">
-                Участники отметят доступность в свободной сетке полных суток, а затем вы выберете итоговое время.
+        <MudText Typo="Typo.h4" GutterBottom="true">Найти общее время</MudText>
+            <MudText Color="Color.Tertiary" Class="mb-5">
+                Поделитесь ссылкой с участниками — они отметят, когда им удобно. Затем вы выберете итоговое время.
         </MudText>
 
         @if (!string.IsNullOrWhiteSpace(errorMessage))
@@ -21,24 +21,28 @@
 
         <EditForm Model="model" OnValidSubmit="CreateAsync">
             <DataAnnotationsValidator />
-            <MudTextField @bind-Value="model.Title" Label="Название встречи" Required="true" For="@(() => model.Title)" Class="mb-3" />
+            <MudTextField @bind-Value="model.Title" Label="Название события" Required="true" For="@(() => model.Title)" Class="mb-3" />
             <MudTextField @bind-Value="model.OrganizerName" Label="Ваше имя" Required="true" For="@(() => model.OrganizerName)" Class="mb-3" />
-            <MudTextField @bind-Value="model.Description" Label="Описание" Lines="3" Class="mb-3" />
-            <MudTextField @bind-Value="model.TimeZone" Label="Часовой пояс организатора (IANA)" Required="true" HelperText="Например, Europe/Moscow" Class="mb-4" />
-            <MudTextField @bind-Value="model.Password" Label="Пароль организатора (необязательно)" InputType="InputType.Password" HelperText="Минимум 4 символа. Пароль нужен для восстановления доступа." Class="mb-4" />
+            <MudTextField @bind-Value="model.Password" Label="Пароль (необязательно)" InputType="InputType.Password" HelperText="Минимум 4 символа. Пароль нужен для восстановления доступа." Class="mb-4" />
 
-            <MudText Typo="Typo.h6" Class="mb-2">Диапазон свободной сетки</MudText>
+            <MudText Typo="Typo.h6" Class="mb-2">На какие дни ищем время</MudText>
             <MudGrid>
                 <MudItem xs="12" sm="6"><MudDatePicker @bind-Date="model.StartDate" Label="Дата начала" Required="true" /></MudItem>
                 <MudItem xs="12" sm="6"><MudDatePicker @bind-Date="model.EndDate" Label="Дата окончания" Required="true" /></MudItem>
                 <MudItem xs="12">
-                    <MudSelect @bind-Value="model.Step" Label="Шаг сетки" Required="true">
+                    <MudSelect @bind-Value="model.Step" Label="Шаг времени" Required="true">
                         <MudSelectItem Value="15">15 минут</MudSelectItem>
                         <MudSelectItem Value="30">30 минут</MudSelectItem>
                         <MudSelectItem Value="60">60 минут</MudSelectItem>
                     </MudSelect>
                 </MudItem>
-                <MudItem xs="12">
+            </MudGrid>
+
+            <MudExpansionPanels Class="mt-4">
+                <MudExpansionPanel Text="Дополнительные параметры">
+                    <MudTextField @bind-Value="model.Description" Label="Описание" Lines="3" Class="mb-3" />
+                    <MudTextField @bind-Value="model.TimeZone" Label="Часовой пояс" Required="true" HelperText="Например, Europe/Moscow" Class="mb-4" />
+
                     <MudRadioGroup T="RetentionMode" @bind-Value="model.RetentionMode">
                         <MudText Typo="Typo.subtitle2">Хранение встречи</MudText>
                         <MudRadio T="RetentionMode" Value="RetentionMode.KeepForever">
@@ -48,8 +52,8 @@
                             Удалить через день после окончания
                         </MudRadio>
                     </MudRadioGroup>
-                </MudItem>
-            </MudGrid>
+                </MudExpansionPanel>
+            </MudExpansionPanels>
 
             <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" Class="mt-4" Disabled="isSaving">
                 @(isSaving ? "Создание…" : "Создать встречу")
