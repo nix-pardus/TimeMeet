@@ -39,7 +39,8 @@ public sealed record IntervalAnalysis(
     int AvailableCount,
     int IfNeededCount,
     int CannotCount,
-    IReadOnlyCollection<ParticipantBreakdown> ParticipantBreakdown);
+    IReadOnlyCollection<ParticipantBreakdown> ParticipantBreakdown,
+    bool IsCommonAvailability = false);
 
 // Оставлен для обратной совместимости с существующими интеграционными тестами.
 public sealed record GridCellAnalysis(
