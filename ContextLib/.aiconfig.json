@@ -1,0 +1,26 @@
+{
+  "IncludeFolders": [ "." ],
+  "ExcludeFolderNames": [
+    "bin",
+    "obj",
+    ".git",
+    ".vs",
+    "packages",
+    ".github",
+    "docs",
+    "ContextLib"
+  ],
+  "ExcludeExtensions": [
+    ".dll",
+    ".exe",
+    ".pdb",
+    ".suo",
+    ".user"
+  ],
+  "ExcludeFilePatterns": [
+    ".gitattributes",
+    ".gitignore",
+    ".aiconfig.json",
+    "context.ai.txt"
+  ]
+}
