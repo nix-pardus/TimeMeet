@@ -236,7 +236,7 @@ button.heatmap-cell:not(:disabled):hover {
     gap: 1rem;
     flex-wrap: wrap;
     margin-top: .75rem;
-    color: #495057;
+    color: var(--mud-palette-text-primary);
     font-size: .8rem;
 }
 
