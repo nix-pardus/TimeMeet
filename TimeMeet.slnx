@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/context/">
+    <Project Path="ContextLib/ContextLib.csproj" Id="72066fcc-44c4-434f-baf7-06496b10a1fb" />
+  </Folder>
   <Folder Name="/docs/">
     <File Path="docs/TECHNICAL_SPECIFICATION.md" />
   </Folder>
