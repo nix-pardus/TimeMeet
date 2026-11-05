@@ -21,7 +21,7 @@
 
         <EditForm Model="model" OnValidSubmit="CreateAsync">
             <DataAnnotationsValidator />
-            <MudTextField @bind-Value="model.Title" Label="Название события" Required="true" For="@(() => model.Title)" Class="mb-3" />
+            <MudTextField @bind-Value="model.Title" Label="Название встречи" Required="true" For="@(() => model.Title)" Class="mb-3" />
             <MudTextField @bind-Value="model.OrganizerName" Label="Ваше имя" Required="true" For="@(() => model.OrganizerName)" Class="mb-3" />
             <MudTextField @bind-Value="model.Password" Label="Пароль (необязательно)" InputType="InputType.Password" HelperText="Минимум 4 символа. Пароль нужен для восстановления доступа." Class="mb-4" />
 
