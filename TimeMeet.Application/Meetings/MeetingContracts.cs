@@ -66,6 +66,7 @@ public interface IMeetingQrCodeGenerator
 public interface IMeetingService
 {
     Task<CreatedMeeting> CreateAsync(CreateMeetingRequest request, CancellationToken cancellationToken = default);
+    Task<Meeting?> GetByShortCodeAsync(string shortCode, CancellationToken cancellationToken = default);
     Task<Meeting?> GetForOwnerAsync(string shortCode, string ownerToken, CancellationToken cancellationToken = default);
     Task<ParticipantMeeting?> GetForParticipantAsync(string shortCode, string? participantToken, CancellationToken cancellationToken = default);
     Task<CreatedParticipant> CreateParticipantAsync(string shortCode, string displayName, string timeZone, string? password = null, CancellationToken cancellationToken = default);
