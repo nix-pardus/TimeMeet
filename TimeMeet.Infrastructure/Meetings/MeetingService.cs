@@ -96,7 +96,17 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
             .Include(x => x.GridCells)
             .ThenInclude(x => x.Availabilities)
             .Include(x => x.Participants)
+            .ThenInclude(x => x.Availabilities)
             .SingleOrDefaultAsync(x => x.ShortCode == shortCode && x.OwnerToken == ownerToken, cancellationToken);
+    }
+
+    public async Task<Meeting?> GetByShortCodeAsync(string shortCode, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        return await dbContext.Meetings
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.ShortCode == shortCode, cancellationToken);
     }
 
     public async Task<ParticipantMeeting?> GetForParticipantAsync(string shortCode, string? participantToken, CancellationToken cancellationToken = default)
@@ -618,13 +628,17 @@ public sealed class MeetingService(IDbContextFactory<TimeMeetDbContext> dbContex
 
         ValidateTimeZone(request.TimeZone);
 
+        var organizerTimeZone = TimeZoneInfo.FindSystemTimeZoneById(request.TimeZone);
+        var organizerToday = DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, organizerTimeZone));
+
         if (request.GridStepMinutes is not (15 or 30 or 60))
             throw new ArgumentException("Шаг сетки должен быть 15, 30 или 60 минут.", nameof(request));
 
         if (request.GridEndDate < request.GridStartDate)
             throw new ArgumentException("Диапазон дат сетки указан некорректно.", nameof(request));
 
-        if (request.GridStartDate < DateOnly.FromDateTime(DateTime.UtcNow))
+        if (request.GridStartDate < organizerToday)
             throw new ArgumentException("Дата начала не может быть в прошлом.", nameof(request));
 
         var dayCount = request.GridEndDate.DayNumber - request.GridStartDate.DayNumber + 1;

@@ -1,4 +1,5 @@
 @page "/manage/{ShortCode}"
+@using System.ComponentModel.DataAnnotations
 @using TimeMeet.Application.Meetings
 @using TimeMeet.Domain.Entities
 @using TimeMeet.Domain.Enums
@@ -17,13 +18,54 @@
     }
     else if (!string.IsNullOrWhiteSpace(errorMessage))
     {
-        <MudAlert Severity="Severity.Error">@errorMessage</MudAlert>
-        <MudButton Href="@($"/manage-login/{Uri.EscapeDataString(ShortCode)}")"
-                   Variant="Variant.Outlined"
-                   Color="Color.Primary"
-                   Class="mt-4">
-            Войти по паролю организатора
+        <MudAlert Severity="Severity.Error">Встреча не найдена.</MudAlert>
+        <MudButton Href="/" Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4">
+            На главную
         </MudButton>
+    }
+    else if (_needsPassword)
+    {
+        <MudPaper Class="pa-6" Style="max-width:400px">
+            <MudText Typo="Typo.h5">Вход для организатора</MudText>
+            <MudText Class="mb-4">Встреча: «@_meetingTitle»</MudText>
+            <EditForm Model="_passwordModel" OnValidSubmit="LoginOwnerAsync">
+                <DataAnnotationsValidator />
+                <MudTextField @bind-Value="_passwordModel.Password"
+                              Label="Пароль"
+                              InputType="InputType.Password"
+                              Required="true" />
+                <MudButton ButtonType="ButtonType.Submit"
+                            Variant="Variant.Filled"
+                            Color="Color.Primary"
+                            Class="mt-4"
+                            Disabled="_isLoggingIn">
+                    Войти
+                </MudButton>
+            </EditForm>
+            @if (!string.IsNullOrWhiteSpace(_loginError))
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-3">@_loginError</MudAlert>
+            }
+        </MudPaper>
+    }
+    else if (_accessDeniedNoPassword)
+    {
+        <MudPaper Class="pa-6" Style="max-width:500px">
+            <MudText Typo="Typo.h5" GutterBottom="true">Доступ запрещён</MudText>
+            <MudText Class="mb-4">
+                Эта встреча не защищена паролем. Войти можно только с того браузера,
+                где она была создана.
+            </MudText>
+            <MudText Class="mb-4">
+                Совет: в следующий раз задайте пароль при создании встречи —
+                тогда доступ можно будет восстановить с любого устройства.
+            </MudText>
+            <MudButton Href="@($"/m/{Uri.EscapeDataString(ShortCode)}")"
+                       Variant="Variant.Filled"
+                       Color="Color.Primary">
+                Перейти к голосованию
+            </MudButton>
+        </MudPaper>
     }
     else if (meeting is not null)
     {
@@ -33,11 +75,22 @@
         </MudText>
 
         <MudPaper Class="pa-4 mb-4">
-            <MudText Typo="Typo.h6">Ссылка для участников</MudText>
-            <MudTextField Value="@ParticipantUrl" ReadOnly="true" />
-            <MudText Typo="Typo.caption">
-                Участников: @meeting.Participants.Count · Часовой пояс: @meeting.TimeZone
+            <MudText Typo="Typo.h6">Участники</MudText>
+
+            <MudText Typo="Typo.subtitle2">
+                Отметили доступность (@GetParticipantsWithAvailability().Count)
             </MudText>
+            <MudText Class="mb-3">@FormatParticipants(GetParticipantsWithAvailability())</MudText>
+
+            <MudText Typo="Typo.subtitle2">
+                Отметили «нет подходящего времени» (@GetParticipantsWithNoSuitableTime().Count)
+            </MudText>
+            <MudText Class="mb-3">@FormatParticipants(GetParticipantsWithNoSuitableTime())</MudText>
+
+            <MudText Typo="Typo.subtitle2">
+                Зашли, но не проголосовали (@GetParticipantsWithoutVote().Count)
+            </MudText>
+            <MudText>@FormatParticipants(GetParticipantsWithoutVote())</MudText>
         </MudPaper>
 
         @if (meeting.Status == MeetingStatus.Active)
@@ -64,31 +117,31 @@
                            Disabled="isBusy">
                     Закрыть без выбранного времени
                 </MudButton>
+            </MudPaper>
+        }
 
-                @if (!string.IsNullOrWhiteSpace(qrCodeDataUri))
-                {
-                    <MudPaper Class="pa-4 mt-4">
-                        <MudText Typo="Typo.h6">Ссылка для участников</MudText>
-                        <MudTextField Value="@ParticipantUrl" ReadOnly="true" />
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="mt-3">
-                            <img src="@qrCodeDataUri" alt="QR-код ссылки встречи" width="180" height="180" />
-                            <MudStack Spacing="2">
-                                <MudButton Variant="Variant.Outlined" OnClick="CopyMeetingLinkAsync">
-                                    Скопировать ссылку
-                                </MudButton>
-                                <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1">
-                                    <MudButton Href="@TelegramShareUrl" Target="_blank" Variant="Variant.Outlined">Telegram</MudButton>
-                                    <MudButton Href="@WhatsAppShareUrl" Target="_blank" Variant="Variant.Outlined">WhatsApp</MudButton>
-                                    <MudButton Href="@VkShareUrl" Target="_blank" Variant="Variant.Outlined">ВКонтакте</MudButton>
-                                    <MudButton Href="@EmailShareUrl" Variant="Variant.Outlined">Email</MudButton>
-                                </MudStack>
-                            </MudStack>
+        @if (!string.IsNullOrWhiteSpace(qrCodeDataUri))
+        {
+            <MudPaper Class="pa-4 mt-4">
+                <MudText Typo="Typo.h6">Ссылка на событие</MudText>
+                <MudTextField Value="@ParticipantUrl" ReadOnly="true" />
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="mt-3">
+                    <img src="@qrCodeDataUri" alt="QR-код для ссылки события" width="180" height="180" />
+                    <MudStack Spacing="2">
+                        <MudButton Variant="Variant.Outlined" OnClick="CopyMeetingLinkAsync">
+                            Копировать ссылку
+                        </MudButton>
+                        <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1">
+                            <MudButton Href="@TelegramShareUrl" Target="_blank" Variant="Variant.Outlined">Telegram</MudButton>
+                            <MudButton Href="@WhatsAppShareUrl" Target="_blank" Variant="Variant.Outlined">WhatsApp</MudButton>
+                            <MudButton Href="@VkShareUrl" Target="_blank" Variant="Variant.Outlined">ВКонтакте</MudButton>
+                            <MudButton Href="@EmailShareUrl" Variant="Variant.Outlined">Email</MudButton>
                         </MudStack>
-                        @if (!string.IsNullOrWhiteSpace(shareMessage))
-                        {
-                            <MudText Typo="Typo.caption" Color="Color.Success">@shareMessage</MudText>
-                        }
-                    </MudPaper>
+                    </MudStack>
+                </MudStack>
+                @if (!string.IsNullOrWhiteSpace(shareMessage))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Success">@shareMessage</MudText>
                 }
             </MudPaper>
         }
@@ -101,6 +154,24 @@
                     : $"Итог: {Format(meeting.SelectedStartTime.Value)} — {Format(meeting.SelectedEndTime!.Value)}")
             </MudAlert>
 
+            @if (meeting.SelectedStartTime is not null)
+            {
+                <MudPaper Class="pa-4 mt-4">
+                    <MudText Typo="Typo.h6">Экспорт встречи</MudText>
+                    <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="2" Class="mt-3">
+                        <MudButton Href="@($"/export/{ShortCode}/ics")"
+                                   Target="_blank"
+                                   Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.CalendarMonth">
+                            Добавить в календарь
+                        </MudButton>
+                        <MudButton Href="@($"/export/{ShortCode}/ics")" Target="_blank" Variant="Variant.Outlined">.ics</MudButton>
+                        <MudButton Href="@($"/export/{ShortCode}/csv")" Target="_blank" Variant="Variant.Outlined">CSV</MudButton>
+                        <MudButton Href="@($"/export/{ShortCode}/json")" Target="_blank" Variant="Variant.Outlined">JSON</MudButton>
+                    </MudStack>
+                </MudPaper>
+            }
         }
 
         @if (meeting.Status is MeetingStatus.Active or MeetingStatus.Closed)
@@ -140,6 +211,12 @@
     private string? ownerToken;
     private string? qrCodeDataUri;
     private string? shareMessage;
+    private bool _needsPassword;
+    private bool _accessDeniedNoPassword;
+    private string? _meetingTitle;
+    private readonly OwnerPasswordModel _passwordModel = new();
+    private string? _loginError;
+    private bool _isLoggingIn;
 
     private string ParticipantUrl =>
         Navigation.ToAbsoluteUri($"/m/{ShortCode}").ToString();
@@ -151,24 +228,60 @@
     private string VkShareUrl => $"https://vk.com/share.php?url={EncodedParticipantUrl}&title={ShareText}";
     private string EmailShareUrl => $"mailto:?subject={ShareText}&body={EncodedParticipantUrl}";
 
+    private IReadOnlyList<Participant> GetParticipantsWithAvailability() =>
+        meeting?.Participants
+            .Where(x => !x.HasNoSuitableTime && x.Availabilities.Count > 0)
+            .ToList()
+        ?? [];
+
+    private IReadOnlyList<Participant> GetParticipantsWithNoSuitableTime() =>
+        meeting?.Participants
+            .Where(x => x.HasNoSuitableTime)
+            .ToList()
+        ?? [];
+
+    private IReadOnlyList<Participant> GetParticipantsWithoutVote() =>
+        meeting?.Participants
+            .Where(x => !x.HasNoSuitableTime && x.Availabilities.Count == 0)
+            .ToList()
+        ?? [];
+
+    private static string FormatParticipants(IEnumerable<Participant> participants) =>
+        string.Join(", ", participants.Select(x => $"{x.DisplayName} ({x.TimeZone})")) is { Length: > 0 } formatted
+            ? formatted
+            : "—";
+
     protected override async Task OnInitializedAsync()
     {
         ownerToken = HttpContextAccessor.HttpContext?.Request.Cookies[$"timemeet-owner-{ShortCode}"];
 
-        if (string.IsNullOrWhiteSpace(ownerToken))
+        if (!string.IsNullOrWhiteSpace(ownerToken))
         {
-            errorMessage = "Ссылка владельца недействительна.";
-            isLoading = false;
-            return;
+            meeting = await MeetingService.GetForOwnerAsync(ShortCode, ownerToken);
+            if (meeting is not null)
+            {
+                await RefreshQrCodeAsync();
+                isLoading = false;
+                return;
+            }
+
+            ownerToken = null;
         }
 
-        meeting = await MeetingService.GetForOwnerAsync(ShortCode, ownerToken);
-
-        if (meeting is null)
+        var publicMeeting = await MeetingService.GetByShortCodeAsync(ShortCode);
+        if (publicMeeting is null)
         {
-            errorMessage = "Встреча не найдена или доступ организатора недействителен.";
+            errorMessage = "Встреча не найдена.";
         }
-        await RefreshQrCodeAsync();
+        else if (publicMeeting.OwnerPasswordHash is null)
+        {
+            _accessDeniedNoPassword = true;
+        }
+        else
+        {
+            _meetingTitle = publicMeeting.Title;
+            _needsPassword = true;
+        }
 
         isLoading = false;
     }
@@ -185,7 +298,7 @@
     private Task RefreshQrCodeAsync()
     {
         qrCodeDataUri = null;
-        if (meeting?.Status == MeetingStatus.Active)
+        if (meeting is not null)
         {
             var bytes = QrCodeGenerator.Generate(ParticipantUrl);
             qrCodeDataUri = $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
@@ -283,6 +396,28 @@
         }
     }
 
+    private async Task LoginOwnerAsync()
+    {
+        _loginError = null;
+        _isLoggingIn = true;
+
+        try
+        {
+            var result = await MeetingService.AuthenticateOwnerAsync(ShortCode, _passwordModel.Password);
+            Navigation.NavigateTo(
+                $"/manage-access/{Uri.EscapeDataString(ShortCode)}?token={Uri.EscapeDataString(result.OwnerToken)}",
+                forceLoad: true);
+        }
+        catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException)
+        {
+            _loginError = "Неверный пароль";
+        }
+        finally
+        {
+            _isLoggingIn = false;
+        }
+    }
+
     private string Format(DateTimeOffset value) =>
         value.ToLocalTime().ToString("dd.MM.yyyy HH:mm");
 
@@ -300,4 +435,10 @@
         mode == RetentionMode.DeleteAfterLastDay
             ? "Удалить после последнего дня"
             : "Хранить постоянно";
+
+    private sealed class OwnerPasswordModel
+    {
+        [Required]
+        public string Password { get; set; } = string.Empty;
+    }
 }

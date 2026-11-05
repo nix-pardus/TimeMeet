@@ -21,6 +21,8 @@
     ".gitattributes",
     ".gitignore",
     ".aiconfig.json",
-    "context.ai.txt"
+    "context.ai.txt",
+    "LICENSE.txt",
+    "README.md"
   ]
 }
