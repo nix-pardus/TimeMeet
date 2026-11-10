@@ -16,11 +16,21 @@ public sealed class CreateMeetingRequest
     public string? OrganizerPassword { get; init; }
 }
 
+public sealed record OwnerLoginRequest(string Password);
+public sealed record ParticipantRestoreRequest(string DisplayName, string Password);
+
 public sealed record CreatedMeeting(Meeting Meeting, string OwnerToken, string OrganizerParticipantToken);
 public sealed record ParticipantMeeting(Meeting Meeting, Participant? Participant);
 public sealed record CreatedParticipant(Participant Participant, string ParticipantToken);
 public sealed record AuthenticatedParticipant(Participant Participant, string ParticipantToken);
 public sealed record AuthenticatedOwner(Meeting Meeting, string OwnerToken);
+public sealed record LoginApiResponse(string OwnerToken, string RedirectUrl);
+public sealed record RestoreApiResponse(string ParticipantToken, string RedirectUrl);
+public sealed record CreateMeetingApiResponse(
+    string ShortCode,
+    string OwnerToken,
+    string OrganizerParticipantToken,
+    string RedirectUrl);
 public sealed record AvailabilitySelection(Guid TargetId, AvailabilityStatus Status);
 
 public sealed record ParticipantBreakdown(

@@ -1,6 +1,7 @@
 using Hangfire;
 using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Components;
 using MudBlazor.Services;
 using TimeMeet.Application.Meetings;
 using TimeMeet.Infrastructure.Data;
@@ -18,6 +19,10 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped(sp => new HttpClient
+{
+    BaseAddress = new Uri(sp.GetRequiredService<NavigationManager>().BaseUri)
+});
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Host=localhost;Port=5432;Database=timemeetapp;Username=postgres;Password=postgres";
 builder.Services.AddRateLimiter(options =>
 {
@@ -28,6 +33,53 @@ builder.Services.AddRateLimiter(options =>
         limiterOptions.QueueLimit = 0;
         limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
     });
+
+    options.AddPolicy("owner-password", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            $"{GetClientIp(context)}|{GetShortCode(context)}",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(5),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+
+    options.AddPolicy("participant-restore", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            $"{GetClientIp(context)}|{GetShortCode(context)}",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+
+    options.AddPolicy("create-meeting", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            GetClientIp(context),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(60),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        var retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var value)
+            ? value
+            : TimeSpan.FromMinutes(5);
+        context.HttpContext.Response.Headers.RetryAfter = ((int)retryAfter.TotalSeconds).ToString();
+        await context.HttpContext.Response.WriteAsJsonAsync(new
+        {
+            error = "too_many_requests",
+            message = "Слишком много попыток. Попробуйте позже."
+        }, cancellationToken);
+    };
 });
 builder.Services.AddHangfire(configuration => configuration
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
@@ -50,7 +102,9 @@ if (!app.Environment.IsDevelopment())
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments("/api"),
+    branch => branch.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 app.UseHttpsRedirection();
 
 app.UseAntiforgery();
@@ -97,11 +151,87 @@ app.UseHangfireDashboard("/hangfire", new DashboardOptions
     Authorization = [new LocalRequestsOnlyDashboardAuthorizationFilter()]
 });
 
-RecurringJob.AddOrUpdate<MeetingRetentionJob>(
-    "meeting-retention",
-    job => job.ExecuteAsync(CancellationToken.None),
-    "0 3 * * *",
-    new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+// CSRF не применяется: endpoint выдаёт токен только при валидном пароле,
+// что делает CSRF-атаку бессмысленной. Пересмотреть, если появятся
+// state-changing операции для уже аутентифицированного пользователя.
+app.MapPost("/api/manage/{shortCode}/login", async (
+    string shortCode,
+    OwnerLoginRequest request,
+    IMeetingService meetingService,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var result = await meetingService.AuthenticateOwnerAsync(shortCode, request.Password, cancellationToken);
+        return Results.Ok(new LoginApiResponse(
+            result.OwnerToken,
+            $"/manage-access/{Uri.EscapeDataString(shortCode)}?token={Uri.EscapeDataString(result.OwnerToken)}"));
+    }
+    catch (ArgumentException)
+    {
+        return Results.BadRequest(new { error = "meeting_not_found" });
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Results.Json(new { error = "invalid_password" }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+}).DisableAntiforgery().RequireRateLimiting("owner-password");
+
+app.MapPost("/api/m/{shortCode}/restore", async (
+    string shortCode,
+    ParticipantRestoreRequest request,
+    IMeetingService meetingService,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var result = await meetingService.AuthenticateParticipantAsync(
+            shortCode, request.DisplayName, request.Password, cancellationToken);
+        return Results.Ok(new RestoreApiResponse(
+            result.ParticipantToken,
+            $"/participant-access/{Uri.EscapeDataString(shortCode)}?token={Uri.EscapeDataString(result.ParticipantToken)}"));
+    }
+    catch (ArgumentException)
+    {
+        return Results.BadRequest(new { error = "meeting_not_found" });
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Results.Json(new { error = "invalid_credentials" }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+}).DisableAntiforgery().RequireRateLimiting("participant-restore");
+
+app.MapPost("/api/meetings", async (
+    CreateMeetingRequest request,
+    IMeetingService meetingService,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var result = await meetingService.CreateAsync(request, cancellationToken);
+        var shortCode = result.Meeting.ShortCode;
+        var redirectUrl = $"/manage-access/{Uri.EscapeDataString(shortCode)}?token={Uri.EscapeDataString(result.OwnerToken)}&participantToken={Uri.EscapeDataString(result.OrganizerParticipantToken)}";
+        return Results.Created(redirectUrl, new CreateMeetingApiResponse(
+            shortCode, result.OwnerToken, result.OrganizerParticipantToken, redirectUrl));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = "validation_failed", message = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.BadRequest(new { error = "validation_failed", message = exception.Message });
+    }
+}).DisableAntiforgery().RequireRateLimiting("create-meeting");
+
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    RecurringJob.AddOrUpdate<MeetingRetentionJob>(
+        "meeting-retention",
+        job => job.ExecuteAsync(CancellationToken.None),
+        "0 3 * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+}
 
 app.MapGet("/manage-access/{shortCode}", async (
     HttpContext httpContext,
@@ -194,3 +324,19 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+static string GetClientIp(HttpContext context) =>
+    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+static string GetShortCode(HttpContext context)
+{
+    var segments = (context.Request.Path.Value ?? "")
+        .Split('/', StringSplitOptions.RemoveEmptyEntries);
+    return segments.Length >= 3 && segments[0].Equals("api", StringComparison.OrdinalIgnoreCase)
+        ? segments[2]
+        : segments.Length >= 2 ? segments[1] : "unknown";
+}
+
+public partial class Program
+{
+}
