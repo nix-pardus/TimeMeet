@@ -18,7 +18,6 @@
     }
     else if (!string.IsNullOrWhiteSpace(errorMessage))
     {
-
         <MudAlert Severity="Severity.Error">@errorMessage</MudAlert>
     }
     else if (meeting is not null && meeting.Status == MeetingStatus.Deleted)
@@ -42,23 +41,28 @@
     else if (meeting is not null && participant is null)
     {
         <MudPaper Class="pa-6">
-            <MudText Typo="Typo.h4">@meeting.Title</MudText><MudText Class="mb-4">Организатор: @meeting.OrganizerName</MudText>
+            <MudText Typo="Typo.h4">@meeting.Title</MudText>
+            <MudText Class="mb-4">Организатор: @meeting.OrganizerName</MudText>
             <MudText Typo="Typo.h6" Class="mb-2">Я здесь впервые</MudText>
             <EditForm Model="participantModel" OnValidSubmit="CreateParticipantAsync">
                 <DataAnnotationsValidator />
+                @if (!string.IsNullOrWhiteSpace(participantError))
+                {
+                    <MudAlert Severity="Severity.Error" Class="mb-3">@participantError</MudAlert>
+                }
                 <MudTextField T="string" @bind-Value="participantModel.DisplayName" Label="Ваше имя" Required="true" />
-                <MudTextField T="string" @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" />
                 <MudTextField T="string" @bind-Value="participantModel.Password" Label="Пароль (необязательно)" InputType="InputType.Password" HelperText="Если указать пароль, доступ можно будет восстановить после потери cookie." />
+                <MudExpansionPanels Class="mt-3">
+                    <MudExpansionPanel Text="Дополнительно" Dense="true">
+                        <MudTextField T="string" @bind-Value="participantModel.TimeZone" Label="Часовой пояс (IANA)" Required="true" HelperText="Определяется автоматически, можно изменить при необходимости." />
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
                 <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="mt-4">Продолжить</MudButton>
             </EditForm>
             <MudDivider Class="my-6" />
-            <MudText Typo="Typo.h6" Class="mb-2">Восстановить доступ</MudText>
-            <EditForm Model="restoreModel" OnValidSubmit="RestoreParticipantAsync">
-                <DataAnnotationsValidator />
-                <MudTextField T="string" @bind-Value="restoreModel.DisplayName" Label="Ваше имя" Required="true" />
-                <MudTextField T="string" @bind-Value="restoreModel.Password" Label="Пароль" InputType="InputType.Password" Required="true" />
-                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4">Войти</MudButton>
-            </EditForm>
+            <MudText Typo="Typo.body2">
+                Уже участвовали? <MudLink Href="@RestoreUrl">Восстановить доступ</MudLink>
+            </MudText>
         </MudPaper>
     }
     else if (meeting is not null && participant is not null)
@@ -190,31 +194,30 @@
             }
             else if (hasSavedChanges)
             {
-
                 <MudText Typo="Typo.caption" Color="Color.Success">Сохранено</MudText>
             }
         </MudPaper>
     }
-    @if (meeting is not null && meeting.Status is not MeetingStatus.Deleted and not MeetingStatus.Archived)
+
+    @if(meeting is not null && participant is not null && meeting.Status is not MeetingStatus.Deleted and not MeetingStatus.Archived)
     {
-        <IntervalAnalysisList Items="intervals" HasVoted="hasVotedParticipants" />
+        <IntervalAnalysisList Items="intervals" HasVoted="hasVotedParticipants"/>
     }
+
 </MudContainer>
 
-@code {
+    @code {
     [Parameter] public string ShortCode { get; set; } = string.Empty;
     private static readonly CultureInfo RussianCulture = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly int[] hours = Enumerable.Range(0, 24).ToArray();
     private Meeting? meeting;
     private Participant? participant;
     private readonly ParticipantModel participantModel = new();
-    private readonly RestoreParticipantModel restoreModel = new();
     private readonly Dictionary<Guid, AvailabilityStatus> statuses = [];
     private CancellationTokenSource? saveCancellation;
     private bool isLoading = true;
     private bool isSaving;
     private bool hasSavedChanges;
-    private bool analysisLoaded;
     private bool timeZoneInitialized;
     private bool showAll;
     private bool isPainting;
@@ -222,8 +225,12 @@
     private AvailabilityStatus? paintingStatus;
     private Guid? lastPaintedCell;
     private string? errorMessage;
+    private string? participantError;
+    private IReadOnlyCollection<IntervalAnalysis> intervals = [];
+    private bool analysisLoaded;
     private bool canEdit => meeting is not null && meeting.Status == MeetingStatus.Active && IsCurrentPhaseOpen();
     private string ManagementUrl => MeetingNavigation.GetManagementPath(ShortCode);
+    private string RestoreUrl => $"/m/{Uri.EscapeDataString(ShortCode)}/restore";
     private IReadOnlyList<DateOnly> heatmapDates => meeting is null
         ? []
         : meeting.GridCells
@@ -232,7 +239,6 @@
             .OrderBy(x => x)
             .ToArray();
     private bool hasVotedParticipants => meeting?.Participants.Any(HasVoted) == true;
-    private IReadOnlyCollection<IntervalAnalysis> intervals = [];
     private bool IsCurrentPhaseOpen() => meeting!.Status == MeetingStatus.Active;
 
     protected override async Task OnInitializedAsync()
@@ -281,7 +287,7 @@
             intervals = await MeetingService.AnalyzeIntervalsAsync(ShortCode);
             analysisLoaded = true;
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        catch(Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
         {
             errorMessage = ex.Message;
         }
@@ -289,6 +295,7 @@
 
     private async Task CreateParticipantAsync()
     {
+        participantError = null;
         try
         {
             var result = await MeetingService.CreateParticipantAsync(ShortCode, participantModel.DisplayName, participantModel.TimeZone, participantModel.Password);
@@ -296,20 +303,7 @@
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
-            errorMessage = ex.Message;
-        }
-    }
-
-    private async Task RestoreParticipantAsync()
-    {
-        try
-        {
-            var result = await MeetingService.AuthenticateParticipantAsync(ShortCode, restoreModel.DisplayName, restoreModel.Password);
-            Navigation.NavigateTo($"/participant-access/{Uri.EscapeDataString(ShortCode)}?token={Uri.EscapeDataString(result.ParticipantToken)}", true);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
-        {
-            errorMessage = ex.Message;
+            participantError = ex.Message;
         }
     }
 
@@ -470,12 +464,12 @@
             _ => "heatmap-cell-unmarked"
         };
 
-    private static string GetStatusShort(AvailabilityStatus? value) => 
-        value switch 
-        { 
-            AvailabilityStatus.Available => "✓", 
-            AvailabilityStatus.IfNeeded => "?", 
-            _ => "" 
+    private static string GetStatusShort(AvailabilityStatus? value) =>
+        value switch
+        {
+            AvailabilityStatus.Available => "✓",
+            AvailabilityStatus.IfNeeded => "?",
+            _ => ""
         };
 
     private static bool HasVoted(Participant value) =>
@@ -508,48 +502,48 @@
 
     private static string GetAggregateClass(CellSummary summary)
     {
-        if (summary.IfNeededCount > 0 && summary.AvailableCount > 0) 
+        if (summary.IfNeededCount > 0 && summary.AvailableCount > 0)
             return "heatmap-cell-mixed";
 
-        if (summary.IfNeededCount > 0) 
+        if (summary.IfNeededCount > 0)
             return "heatmap-cell-if-needed";
 
-        if (summary.AvailableCount == 0) 
-        return "heatmap-cell-unmarked";
+        if (summary.AvailableCount == 0)
+            return "heatmap-cell-unmarked";
 
         var level = summary.VotedCount == 0 ? 0 : (int)Math.Ceiling(summary.AvailableCount * 4d / summary.VotedCount);
 
         return $"heatmap-cell-available-{Math.Clamp(level, 1, 4)}";
     }
 
-    private string GetOwnTooltip(GridCell cell) => 
+    private string GetOwnTooltip(GridCell cell) =>
         $"{FormatTimeRange(cell)} — {GetStatusText(GetStatus(cell.Id))}";
 
-    private string GetTooltip(GridCell cell, CellSummary summary) => 
+    private string GetTooltip(GridCell cell, CellSummary summary) =>
         $"{FormatTimeRange(cell)}\n" +
         $"Свободны: {FormatNames(summary.AvailableNames)} ({summary.AvailableCount} из {summary.VotedCount})\n" +
         $"Если нужно: {FormatNames(summary.IfNeededNames)} ({summary.IfNeededCount})\n" +
         $"Не могут: {FormatNames(summary.CannotNames)} ({summary.CannotCount})";
 
-    private string FormatTimeRange(GridCell cell) => 
+    private string FormatTimeRange(GridCell cell) =>
         $"{ToParticipantTime(cell.StartTime):HH:mm}–{ToParticipantTime(cell.EndTime):HH:mm}, " +
         $"{ToParticipantTime(cell.StartTime):dddd d MMMM}";
 
-    private static string FormatNames(IReadOnlyCollection<string> names) => 
+    private static string FormatNames(IReadOnlyCollection<string> names) =>
         names.Count == 0 ? "—" : string.Join(", ", names);
 
-    private static string GetStatusText(AvailabilityStatus? value) => 
-        value switch 
+    private static string GetStatusText(AvailabilityStatus? value) =>
+        value switch
         {
-            AvailabilityStatus.Available => "Свободен", 
-            AvailabilityStatus.IfNeeded => "Если нужно", 
-            _ => "Не отмечено" 
+            AvailabilityStatus.Available => "Свободен",
+            AvailabilityStatus.IfNeeded => "Если нужно",
+            _ => "Не отмечено"
         };
 
     private sealed record CellSummary(
-        IReadOnlyCollection<string> AvailableNames, 
-        IReadOnlyCollection<string> IfNeededNames, 
-        IReadOnlyCollection<string> CannotNames, 
+        IReadOnlyCollection<string> AvailableNames,
+        IReadOnlyCollection<string> IfNeededNames,
+        IReadOnlyCollection<string> CannotNames,
         int VotedCount)
     {
         public int AvailableCount => AvailableNames.Count;
@@ -557,16 +551,10 @@
         public int CannotCount => CannotNames.Count;
     }
 
-    private sealed class ParticipantModel 
-    {
-        [Required] public string DisplayName { get; set; } = string.Empty; 
-        [Required] public string TimeZone { get; set; } = "Europe/Moscow"; 
-        public string? Password { get; set; }
-    }
-
-    private sealed class RestoreParticipantModel
+    private sealed class ParticipantModel
     {
         [Required] public string DisplayName { get; set; } = string.Empty;
-        [Required] public string Password { get; set; } = string.Empty;
+        [Required] public string TimeZone { get; set; } = "Europe/Moscow";
+        public string? Password { get; set; }
     }
 }

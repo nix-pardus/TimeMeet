@@ -230,15 +230,17 @@ public sealed class MeetingServicePostgreSqlTests : IAsyncLifetime
     public async Task AnalyzeIntervals_IncludesAlternativesWithIfNeededAvailability()
     {
         var service = new MeetingService(dbContextFactory);
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Moscow");
+        var startDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timeZone)).AddDays(1);
+        var endDate = startDate.AddDays(1);
         var created = await service.CreateAsync(CreateRequest(
-            new DateOnly(2026, 11, 7),
-            new DateOnly(2026, 11, 8),
+            startDate,
+            endDate,
             "Europe/Moscow",
             30));
         var second = await service.CreateParticipantAsync(created.Meeting.ShortCode, "Участник 2", "Europe/Moscow");
         var third = await service.CreateParticipantAsync(created.Meeting.ShortCode, "Участник 3", "Europe/Moscow");
 
-        var timeZone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Moscow");
         var cells = created.Meeting.GridCells.ToArray();
 
         static DateTime Local(DateOnly date, TimeSpan time) => date.ToDateTime(TimeOnly.FromTimeSpan(time));
@@ -257,21 +259,21 @@ public sealed class MeetingServicePostgreSqlTests : IAsyncLifetime
         await service.SaveAvailabilityAsync(
             created.Meeting.ShortCode,
             created.OrganizerParticipantToken,
-            Select(Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(17)), Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(3)), AvailabilityStatus.Available)
-                .Concat(Select(Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(17)), Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(23)), AvailabilityStatus.Available))
+            Select(Local(startDate, TimeSpan.FromHours(17)), Local(endDate, TimeSpan.FromHours(3)), AvailabilityStatus.Available)
+                .Concat(Select(Local(endDate, TimeSpan.FromHours(17)), Local(endDate, TimeSpan.FromHours(23)), AvailabilityStatus.Available))
                 .ToArray());
         await service.SaveAvailabilityAsync(
             created.Meeting.ShortCode,
             second.ParticipantToken,
-            Select(Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(15)), Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(23)), AvailabilityStatus.Available)
-                .Concat(Select(Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(16)), Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(22)), AvailabilityStatus.Available))
+            Select(Local(startDate, TimeSpan.FromHours(15)), Local(startDate, TimeSpan.FromHours(23)), AvailabilityStatus.Available)
+                .Concat(Select(Local(endDate, TimeSpan.FromHours(16)), Local(endDate, TimeSpan.FromHours(22)), AvailabilityStatus.Available))
                 .ToArray());
         await service.SaveAvailabilityAsync(
             created.Meeting.ShortCode,
             third.ParticipantToken,
-            Select(Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(13)), Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(18)), AvailabilityStatus.Available)
-                .Concat(Select(Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(18)), Local(new DateOnly(2026, 11, 7), TimeSpan.FromHours(20)), AvailabilityStatus.IfNeeded))
-                .Concat(Select(Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(15.5)), Local(new DateOnly(2026, 11, 8), TimeSpan.FromHours(21)), AvailabilityStatus.IfNeeded))
+            Select(Local(startDate, TimeSpan.FromHours(13)), Local(startDate, TimeSpan.FromHours(18)), AvailabilityStatus.Available)
+                .Concat(Select(Local(startDate, TimeSpan.FromHours(18)), Local(startDate, TimeSpan.FromHours(20)), AvailabilityStatus.IfNeeded))
+                .Concat(Select(Local(endDate, TimeSpan.FromHours(15.5)), Local(endDate, TimeSpan.FromHours(21)), AvailabilityStatus.IfNeeded))
                 .ToArray());
 
         var intervals = (await service.AnalyzeIntervalsAsync(created.Meeting.ShortCode)).ToArray();
