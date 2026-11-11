@@ -12,6 +12,8 @@ using TimeMeet.Web.Components;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
 
+const int MAX_MEETING_COOKIES_PER_PREFIX = 20;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -250,6 +252,8 @@ app.MapGet("/manage-access/{shortCode}", async (
         return Results.BadRequest("Ссылка управления недействительна.");
     }
 
+    TrimMeetingCookies(httpContext, "timemeet-owner-", $"timemeet-owner-{shortCode}", MAX_MEETING_COOKIES_PER_PREFIX);
+
     httpContext.Response.Cookies.Append($"timemeet-owner-{shortCode}", token, new CookieOptions
     {
         HttpOnly = true,
@@ -261,6 +265,8 @@ app.MapGet("/manage-access/{shortCode}", async (
 
     if (!string.IsNullOrWhiteSpace(participantToken))
     {
+        TrimMeetingCookies(httpContext, "timemeet-participant-", $"timemeet-participant-{shortCode}", MAX_MEETING_COOKIES_PER_PREFIX);
+
         httpContext.Response.Cookies.Append($"timemeet-participant-{shortCode}", participantToken, new CookieOptions
         {
             HttpOnly = true,
@@ -307,6 +313,8 @@ app.MapGet("/participant-access/{shortCode}", async (
         return Results.BadRequest("Ссылка участника недействительна.");
     }
 
+    TrimMeetingCookies(httpContext, "timemeet-participant-", $"timemeet-participant-{shortCode}", MAX_MEETING_COOKIES_PER_PREFIX);
+
     httpContext.Response.Cookies.Append($"timemeet-participant-{shortCode}", token, new CookieOptions
     {
         HttpOnly = true,
@@ -337,6 +345,23 @@ static string GetShortCode(HttpContext context)
         : segments.Length >= 2 ? segments[1] : "unknown";
 }
 
+static void TrimMeetingCookies(HttpContext http, string prefix, string keepKey, int max)
+{
+    var stale = http.Request.Cookies.Keys
+        .Where(k => k.StartsWith(prefix, StringComparison.Ordinal) && k != keepKey)
+        .ToArray();
+
+    var toRemoveCount = stale.Length - (max - 1);
+
+    if (toRemoveCount <= 0)
+        return;
+
+    foreach (var key in stale.Take(toRemoveCount))
+        http.Response.Cookies.Delete(key, new CookieOptions { Path = "/" });
+}
+
 public partial class Program
 {
 }
+
+// TODO: заменить на timestamp в cookie value, если понадобится строгая гарантия удаления самых старых при нестандартном порядке cookie.
