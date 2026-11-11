@@ -1,5 +1,6 @@
 @page "/manage/{ShortCode}"
 @using System.ComponentModel.DataAnnotations
+@using System.Globalization
 @using System.Net
 @using System.Net.Http.Json
 @using TimeMeet.Application.Meetings
@@ -154,7 +155,7 @@
             <MudAlert Severity="Severity.Success" Class="mt-4">
                 @(meeting.SelectedStartTime is null
                     ? "Встреча закрыта без выбранного времени."
-                    : $"Итог: {Format(meeting.SelectedStartTime.Value)} — {Format(meeting.SelectedEndTime!.Value)}")
+                    : $"Итог: {FormatDate(meeting.SelectedStartTime.Value)}, {FormatTimeRange(meeting.SelectedStartTime.Value, meeting.SelectedEndTime!.Value)}")
             </MudAlert>
 
             @if (meeting.SelectedStartTime is not null)
@@ -202,7 +203,7 @@
     }
 </MudContainer>
 
-@code {
+    @code {
     [Parameter]
     public string ShortCode { get; set; } = string.Empty;
 
@@ -217,6 +218,7 @@
     private bool _needsPassword;
     private bool _accessDeniedNoPassword;
     private string? _meetingTitle;
+    private static readonly CultureInfo RussianCulture = CultureInfo.GetCultureInfo("ru-RU");
     private readonly OwnerPasswordModel _passwordModel = new();
     private string? _loginError;
     private bool _isLoggingIn;
@@ -435,8 +437,20 @@
         }
     }
 
-    private string Format(DateTimeOffset value) =>
-        value.ToLocalTime().ToString("dd.MM.yyyy HH:mm");
+    private string FormatDate(DateTimeOffset value)
+    {
+        var tz = TimeZoneInfo.FindSystemTimeZoneById(meeting!.TimeZone);
+        var local = TimeZoneInfo.ConvertTime(value, tz);
+        return local.ToString("d MMMM yyyy, dddd", RussianCulture);
+    }
+
+    private string FormatTimeRange(DateTimeOffset start, DateTimeOffset end)
+    {
+        var tz = TimeZoneInfo.FindSystemTimeZoneById(meeting!.TimeZone);
+        var s = TimeZoneInfo.ConvertTime(start, tz);
+        var e = TimeZoneInfo.ConvertTime(end, tz);
+        return $"{s:HH:mm}-{e:HH:mm} ({meeting!.TimeZone})";
+    }
 
     private static string GetStatusText(MeetingStatus status) =>
         status switch
