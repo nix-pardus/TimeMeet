@@ -197,6 +197,10 @@ app.MapPost("/api/m/{shortCode}/restore", async (
     {
         return Results.BadRequest(new { error = "meeting_not_found" });
     }
+    catch (InvalidOperationException)
+    {
+        return Results.BadRequest(new { error = "voting_closed" });
+    }
     catch (UnauthorizedAccessException)
     {
         return Results.Json(new { error = "invalid_credentials" }, statusCode: StatusCodes.Status401Unauthorized);
