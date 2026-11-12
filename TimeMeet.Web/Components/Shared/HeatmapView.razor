@@ -1,0 +1,202 @@
+﻿@using System.Globalization
+@using TimeMeet.Domain.Entities
+@using TimeMeet.Domain.Enums
+
+<div class="tm-heatmap-scope"
+     style="--tm-days: @Days.Count;
+    --tm-rows: @(Hours.Count * SlotsPerHour);
+    --tm-slots: @SlotsPerHour;">
+    <div class="tm-heatmap @(Editable ? "" : "tm-heatmap--readonly")">
+        @* Header *@
+        <div class="tm-corner"></div>
+        @foreach (var day in Days)
+        {
+            <div class="tm-date">
+                <span class="tm-date-label">@day.Label</span>
+                <span class="tm-date-num">@day.Num</span>
+            </div>
+        }
+
+        @* Hours + cells *@
+        @foreach (var hour in Hours)
+        {
+            <div class="tm-hour" style="grid-row: span @SlotsPerHour;">
+                <span class="tm-hour-label">@hour.ToString("00", CultureInfo.InvariantCulture)</span>
+            </div>
+            @for (var slot = 0; slot < SlotsPerHour; slot++)
+            {
+                foreach (var day in Days)
+                {
+                    var cell = GetCell(day.Date, hour, slot);
+                    if (cell is null)
+                    {
+                        <div class="tm-cell tm-cell-empty"></div>
+                        continue;
+                    }
+
+                    if (Editable)
+                    {
+                        var status = GetMyStatus(cell.Id);
+                        <button type="button"
+                                class="tm-cell @GetMyClass(status)"
+                                title="@GetMyTooltip(cell, status)"
+                                @onclick="@(() => OnCellClick.InvokeAsync(cell.Id))">
+                        </button>
+                    }
+                    else
+                    {
+                        var summary = GetSummary(cell.Id);
+                        <div class="tm-cell @GetAggregateClass(summary)"
+                             title="@GetAggregateTooltip(cell, summary)">
+                        </div>
+                    }
+                }
+            }
+        }
+
+        @* End strip + end label *@
+        <div class="tm-end-strip"></div>
+        <div class="tm-end-label">@EndHour.ToString("00", CultureInfo.InvariantCulture)</div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Meeting Meeting { get; set; } = null!;
+    [Parameter] public bool Editable { get; set; }
+    [Parameter] public string DisplayTimeZone { get; set; } = "UTC";
+    [Parameter] public int StartHour { get; set; } = 8;
+    [Parameter] public int EndHour { get; set; } = 23;
+    [Parameter]
+    public IReadOnlyDictionary<Guid, AvailabilityStatus> MyStatuses { get; set; }
+        = new Dictionary<Guid, AvailabilityStatus>();
+    [Parameter] public EventCallback<Guid> OnCellClick { get; set; }
+
+    private static readonly CultureInfo RussianCulture = CultureInfo.GetCultureInfo("ru-RU");
+
+    private sealed record DayInfo(DateOnly Date, string Label, string Num);
+
+    private readonly Dictionary<(DateOnly Date, int Hour, int Slot), GridCell> cellLookup = new();
+    private IReadOnlyList<DayInfo> Days { get; set; } = [];
+    private IReadOnlyList<int> Hours { get; set; } = [];
+
+    private int SlotsPerHour => 60 / Math.Max(1, Meeting.GridStepMinutes);
+
+    private TimeZoneInfo TimeZone =>
+        TimeZoneInfo.FindSystemTimeZoneById(
+            string.IsNullOrWhiteSpace(DisplayTimeZone) ? "UTC" : DisplayTimeZone);
+
+    protected override void OnParametersSet()
+    {
+        cellLookup.Clear();
+
+        var byDay = new SortedDictionary<DateOnly, bool>();
+
+        foreach (var cell in Meeting.GridCells)
+        {
+            var local = TimeZoneInfo.ConvertTime(cell.StartTime, TimeZone);
+            var date = DateOnly.FromDateTime(local.DateTime);
+            var slot = local.Minute / Math.Max(1, Meeting.GridStepMinutes);
+            cellLookup[(date, local.Hour, slot)] = cell;
+            byDay[date] = true;
+        }
+
+        Days = byDay.Keys
+            .Select(d => new DayInfo(
+                d,
+                d.ToDateTime(TimeOnly.MinValue).ToString("ddd", RussianCulture),
+                d.ToString("dd.MM", RussianCulture)))
+            .ToArray();
+
+        Hours = Meeting.GridCells
+            .Select(c => TimeZoneInfo.ConvertTime(c.StartTime, TimeZone).Hour)
+            .Distinct()
+            .Where(h => h >= StartHour && h < EndHour)
+            .OrderBy(h => h)
+            .ToArray();
+    }
+
+    private GridCell? GetCell(DateOnly date, int hour, int slot) =>
+        cellLookup.TryGetValue((date, hour, slot), out var c) ? c : null;
+
+    private AvailabilityStatus? GetMyStatus(Guid cellId) =>
+        MyStatuses.TryGetValue(cellId, out var s) ? s : null;
+
+    private bool MyVoted => MyStatuses.Count > 0;
+
+    private CellSummary GetSummary(Guid cellId)
+    {
+        var available = 0;
+        var ifNeeded = 0;
+        var cannot = 0;
+
+        foreach (var p in Meeting.Participants)
+        {
+            if (p.HasNoSuitableTime) { cannot++; continue; }
+
+            var status = p.Availabilities.FirstOrDefault(x => x.GridCellId == cellId)?.Status;
+            if (status == AvailabilityStatus.Available) available++;
+            else if (status == AvailabilityStatus.IfNeeded) ifNeeded++;
+            else cannot++;
+        }
+
+        if (MyVoted)
+        {
+            var myStatus = GetMyStatus(cellId);
+            if (myStatus == AvailabilityStatus.Available) available++;
+            else if (myStatus == AvailabilityStatus.IfNeeded) ifNeeded++;
+            else cannot++;
+        }
+
+        return new CellSummary(available, ifNeeded, cannot);
+    }
+
+    private static string GetMyClass(AvailabilityStatus? status) => status switch
+    {
+        AvailabilityStatus.Available => "tm-cell-avail-3",
+        AvailabilityStatus.IfNeeded => "tm-cell-if-needed",
+        _ => ""
+    };
+
+    private static string GetAggregateClass(CellSummary s)
+    {
+        if (s.Available == 0 && s.IfNeeded == 0) return "";
+        if (s.IfNeeded > 0 && s.Available > 0) return "tm-cell-mixed";
+        if (s.IfNeeded > 0) return "tm-cell-if-needed";
+
+        var ratio = s.Total == 0 ? 0d : (double)s.Available / s.Total;
+        if (ratio <= 0.25) return "tm-cell-avail-1";
+        if (ratio <= 0.50) return "tm-cell-avail-2";
+        if (ratio <= 0.75) return "tm-cell-avail-3";
+        return "tm-cell-avail-4";
+    }
+
+    private string GetMyTooltip(GridCell cell, AvailabilityStatus? status)
+    {
+        var statusText = status switch
+        {
+            AvailabilityStatus.Available => "Свободен",
+            AvailabilityStatus.IfNeeded => "Если нужно",
+            _ => "Не отмечено"
+        };
+        return $"{CellLabel(cell)} — {statusText}";
+    }
+
+    private string GetAggregateTooltip(GridCell cell, CellSummary s) =>
+        $"{CellLabel(cell)}\n" +
+        $"Свободны: {s.Available} из {s.Total}\n" +
+        $"Если нужно: {s.IfNeeded}\n" +
+        $"Не могут: {s.Cannot}";
+
+    private string CellLabel(GridCell cell)
+    {
+        var local = TimeZoneInfo.ConvertTime(cell.StartTime, TimeZone);
+        var label = local.ToString("ddd dd.MM", RussianCulture);
+        var end = TimeZoneInfo.ConvertTime(cell.EndTime, TimeZone);
+        return $"{label}, {local:HH:mm}–{end:HH:mm}";
+    }
+
+    private sealed record CellSummary(int Available, int IfNeeded, int Cannot)
+    {
+        public int Total => Available + IfNeeded + Cannot;
+    }
+}

@@ -272,3 +272,293 @@ button.heatmap-cell:not(:disabled):hover {
         font-size: .8rem;
     }
 }
+
+/* ============================================================
+   HeatmapView — новая компактная тепловая карта (прототип)
+   Используется на /heatmap-demo; позже — на /m и /manage
+   ============================================================ */
+
+:root {
+    --tm-bg: #f8f9fa;
+    --tm-card-bg: #ffffff;
+    --tm-border: #e9ecef;
+    --tm-text: #212529;
+    --tm-text-muted: #868e96;
+    --tm-grid-bg: #ced4da;
+    --tm-header-bg: #ffffff;
+    --tm-cell-h: 14px;
+    --tm-cell-w: 64px;
+    --tm-hour-w: 32px;
+    --tm-header-h: 36px;
+    --tm-gap: 1px;
+    --tm-radius: 6px;
+    --tm-unmarked: #e9ecef;
+    --tm-avail-1: #d3f9d8;
+    --tm-avail-2: #8ce99a;
+    --tm-avail-3: #51cf66;
+    --tm-avail-4: #2f9e44;
+    --tm-if-needed: #ffec99;
+}
+
+.tm-app {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    color: var(--tm-text);
+    font-size: 14px;
+    line-height: 1.4;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 16px 8px;
+}
+
+.tm-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+    .tm-header h1 {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0;
+        letter-spacing: -0.01em;
+    }
+
+.tm-tag {
+    font-size: 12px;
+    color: var(--tm-text-muted);
+}
+
+.tm-heatmaps {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 1100px) {
+    .tm-heatmaps {
+        grid-template-columns: 1fr;
+    }
+}
+
+.tm-card {
+    background: var(--tm-card-bg);
+    border: 1px solid var(--tm-border);
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.tm-card-head {
+    margin-bottom: 12px;
+}
+
+    .tm-card-head h2 {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0 0 2px;
+    }
+
+.tm-hint {
+    font-size: 12px;
+    color: var(--tm-text-muted);
+}
+
+.tm-heatmap {
+    display: grid;
+    gap: var(--tm-gap);
+    background: var(--tm-grid-bg);
+    border-radius: var(--tm-radius);
+    overflow: hidden;
+    user-select: none;
+    width: max-content;
+    grid-template-columns: var(--tm-hour-w) repeat(var(--tm-days, 1), var(--tm-cell-w));
+    grid-template-rows: var(--tm-header-h) repeat(var(--tm-rows, 1), var(--tm-cell-h)) 6px;
+}
+
+.tm-corner {
+    position: relative;
+    background: var(--tm-header-bg);
+}
+
+.tm-date {
+    background: var(--tm-header-bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.1;
+}
+
+.tm-date-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--tm-text);
+}
+
+.tm-date-num {
+    font-size: 10px;
+    color: var(--tm-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-hour {
+    position: relative;
+    background: var(--tm-header-bg);
+}
+
+    .tm-corner::after,
+    .tm-hour::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: var(--tm-header-bg);
+        z-index: 1;
+    }
+
+.tm-corner::after {
+    bottom: -1px;
+}
+
+.tm-hour::before {
+    top: -1px;
+}
+
+.tm-hour-label {
+    position: absolute;
+    top: 0;
+    right: 6px;
+    transform: translateY(-50%);
+    font-size: 10px;
+    line-height: 1;
+    color: var(--tm-text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    z-index: 2;
+}
+
+.tm-cell {
+    border: none;
+    padding: 0;
+    margin: 0;
+    border-radius: 2px;
+    background: var(--tm-unmarked);
+    transition: filter 0.1s ease;
+    cursor: pointer;
+    font: inherit;
+}
+
+.tm-heatmap--readonly .tm-cell {
+    cursor: default;
+}
+
+.tm-cell:hover {
+    filter: brightness(0.94);
+}
+
+.tm-heatmap--readonly .tm-cell:hover {
+    filter: none;
+}
+
+.tm-cell-empty {
+    background: var(--tm-header-bg);
+    cursor: default;
+}
+
+.tm-cell-avail-1 {
+    background: var(--tm-avail-1);
+}
+
+.tm-cell-avail-2 {
+    background: var(--tm-avail-2);
+}
+
+.tm-cell-avail-3 {
+    background: var(--tm-avail-3);
+}
+
+.tm-cell-avail-4 {
+    background: var(--tm-avail-4);
+}
+
+.tm-cell-if-needed {
+    background: var(--tm-if-needed);
+}
+
+.tm-cell-mixed {
+    background: linear-gradient(135deg, var(--tm-avail-3) 0 50%, var(--tm-if-needed) 50% 100%);
+}
+
+.tm-end-strip {
+    grid-column: 1 / -1;
+    grid-row: -2 / -1;
+    position: relative;
+    background: var(--tm-header-bg);
+}
+
+    .tm-end-strip::before {
+        content: '';
+        position: absolute;
+        top: -1px;
+        left: 0;
+        width: var(--tm-hour-w);
+        height: 1px;
+        background: var(--tm-header-bg);
+    }
+
+.tm-end-label {
+    grid-column: 1;
+    grid-row: -2 / -1;
+    position: relative;
+    align-self: start;
+    transform: translateY(-50%);
+    font-size: 10px;
+    line-height: 1;
+    color: var(--tm-text-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    padding-right: 6px;
+    white-space: nowrap;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.tm-legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--tm-text-muted);
+    flex-wrap: wrap;
+}
+
+    .tm-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .tm-legend .sw {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        border: 1px solid rgba(0, 0, 0, 0.06);
+    }
+
+.sw-avail {
+    background: var(--tm-avail-3);
+}
+
+.sw-if-needed {
+    background: var(--tm-if-needed);
+}
+
+.sw-unmarked {
+    background: var(--tm-unmarked);
+}
+
+.sw-mixed {
+    background: linear-gradient(135deg, var(--tm-avail-3) 0 50%, var(--tm-if-needed) 50% 100%);
+}
