@@ -2,70 +2,77 @@
 @using TimeMeet.Domain.Entities
 @using TimeMeet.Domain.Enums
 
-<div class="tm-heatmap-scope"
-     style="--tm-days: @Days.Count;
-    --tm-rows: @(Hours.Count * SlotsPerHour);
-    --tm-slots: @SlotsPerHour;">
-    <div class="tm-heatmap @(Editable ? "" : "tm-heatmap--readonly")">
-        @* Header *@
-        <div class="tm-corner"></div>
-        @foreach (var day in Days)
-        {
-            <div class="tm-date">
-                <span class="tm-date-label">@day.Label</span>
-                <span class="tm-date-num">@day.Num</span>
-            </div>
-        }
-
-        @* Hours + cells *@
-        @foreach (var hour in Hours)
-        {
-            <div class="tm-hour" style="grid-row: span @SlotsPerHour;">
-                <span class="tm-hour-label">@hour.ToString("00", CultureInfo.InvariantCulture)</span>
-            </div>
-            @for (var slot = 0; slot < SlotsPerHour; slot++)
+@if (Meeting.GridCells.Count == 0)
+{
+    <div class="tm-heatmap-empty">
+        <p>Нет данных для отображения.</p>
+    </div>
+}
+else
+{
+    <div class="tm-heatmap-scope"
+         style="--tm-days: @Days.Count;
+        --tm-rows: @(Hours.Count * SlotsPerHour);
+        --tm-slots: @SlotsPerHour;">
+        <div class="tm-heatmap @(Editable ? "" : "tm-heatmap--readonly")">
+            <div class="tm-corner"></div>
+            @foreach (var day in Days)
             {
-                foreach (var day in Days)
-                {
-                    var cell = GetCell(day.Date, hour, slot);
-                    if (cell is null)
-                    {
-                        <div class="tm-cell tm-cell-empty"></div>
-                        continue;
-                    }
+                <div class="tm-date">
+                    <span class="tm-date-label">@day.Label</span>
+                    <span class="tm-date-num">@day.Num</span>
+                </div>
+            }
 
-                    if (Editable)
+            @foreach (var hour in Hours)
+            {
+                <div class="tm-hour" style="grid-row: span @SlotsPerHour;">
+                    <span class="tm-hour-label">@hour.ToString("00", CultureInfo.InvariantCulture)</span>
+                </div>
+                @for (var slot = 0; slot < SlotsPerHour; slot++)
+                {
+                    foreach (var day in Days)
                     {
-                        var status = GetMyStatus(cell.Id);
-                        <button type="button"
-                                class="tm-cell @GetMyClass(status)"
-                                title="@GetMyTooltip(cell, status)"
-                                @onclick="@(() => OnCellClick.InvokeAsync(cell.Id))">
-                        </button>
-                    }
-                    else
-                    {
-                        var summary = GetSummary(cell.Id);
-                        <div class="tm-cell @GetAggregateClass(summary)"
-                             title="@GetAggregateTooltip(cell, summary)">
-                        </div>
+                        var cell = GetCell(day.Date, hour, slot);
+                        if (cell is null)
+                        {
+                            <div class="tm-cell tm-cell-empty"></div>
+                            continue;
+                        }
+
+                        if (Editable)
+                        {
+                            var status = GetMyStatus(cell.Id);
+                            <button type="button"
+                                    class="tm-cell @GetMyClass(status)"
+                                    title="@GetMyTooltip(cell, status)"
+                                    @onclick="@(() => OnCellClick.InvokeAsync(cell.Id))">
+                            </button>
+                        }
+                        else
+                        {
+                            var summary = GetSummary(cell.Id);
+                            <div class="tm-cell @GetAggregateClass(summary)"
+                                 title="@GetAggregateTooltip(cell, summary)">
+                            </div>
+                        }
                     }
                 }
             }
-        }
 
-        @* End strip + end label *@
-        <div class="tm-end-strip"></div>
-        <div class="tm-end-label">@EndHour.ToString("00", CultureInfo.InvariantCulture)</div>
+            <div class="tm-end-strip"></div>
+            <div class="tm-end-label">@(Hours[^1] + 1).ToString("00")</div>
+        </div>
     </div>
-</div>
+}
 
 @code {
     [Parameter] public Meeting Meeting { get; set; } = null!;
     [Parameter] public bool Editable { get; set; }
-    [Parameter] public string DisplayTimeZone { get; set; } = "UTC";
-    [Parameter] public int StartHour { get; set; } = 8;
-    [Parameter] public int EndHour { get; set; } = 23;
+    [Parameter] public string DisplayTimeZone { get; set; } = "";
+    [Parameter] public int? StartHour { get; set; }
+    [Parameter] public int? EndHour { get; set; }
+    [Parameter] public bool HasVoted { get; set; }
     [Parameter]
     public IReadOnlyDictionary<Guid, AvailabilityStatus> MyStatuses { get; set; }
         = new Dictionary<Guid, AvailabilityStatus>();
@@ -89,6 +96,14 @@
     {
         cellLookup.Clear();
 
+        if (Meeting is null || Meeting.GridCells.Count == 0)
+        {
+            Days = [];
+            Hours = [];
+            return;
+        }
+
+        var allHours = new SortedSet<int>();
         var byDay = new SortedDictionary<DateOnly, bool>();
 
         foreach (var cell in Meeting.GridCells)
@@ -98,6 +113,7 @@
             var slot = local.Minute / Math.Max(1, Meeting.GridStepMinutes);
             cellLookup[(date, local.Hour, slot)] = cell;
             byDay[date] = true;
+            allHours.Add(local.Hour);
         }
 
         Days = byDay.Keys
@@ -107,11 +123,11 @@
                 d.ToString("dd.MM", RussianCulture)))
             .ToArray();
 
-        Hours = Meeting.GridCells
-            .Select(c => TimeZoneInfo.ConvertTime(c.StartTime, TimeZone).Hour)
-            .Distinct()
-            .Where(h => h >= StartHour && h < EndHour)
-            .OrderBy(h => h)
+        var effectiveStart = StartHour ?? allHours.Min;
+        var effectiveEnd = EndHour ?? (allHours.Max + 1);
+
+        Hours = allHours
+            .Where(h => h >= effectiveStart && h < effectiveEnd)
             .ToArray();
     }
 
@@ -120,8 +136,6 @@
 
     private AvailabilityStatus? GetMyStatus(Guid cellId) =>
         MyStatuses.TryGetValue(cellId, out var s) ? s : null;
-
-    private bool MyVoted => MyStatuses.Count > 0;
 
     private CellSummary GetSummary(Guid cellId)
     {
@@ -139,7 +153,7 @@
             else cannot++;
         }
 
-        if (MyVoted)
+        if (HasVoted)
         {
             var myStatus = GetMyStatus(cellId);
             if (myStatus == AvailabilityStatus.Available) available++;
@@ -190,8 +204,8 @@
     private string CellLabel(GridCell cell)
     {
         var local = TimeZoneInfo.ConvertTime(cell.StartTime, TimeZone);
-        var label = local.ToString("ddd dd.MM", RussianCulture);
         var end = TimeZoneInfo.ConvertTime(cell.EndTime, TimeZone);
+        var label = local.ToString("ddd dd.MM", RussianCulture);
         return $"{label}, {local:HH:mm}–{end:HH:mm}";
     }
 

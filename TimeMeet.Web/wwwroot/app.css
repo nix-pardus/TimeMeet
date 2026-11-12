@@ -375,6 +375,13 @@ button.heatmap-cell:not(:disabled):hover {
     grid-template-rows: var(--tm-header-h) repeat(var(--tm-rows, 1), var(--tm-cell-h)) 6px;
 }
 
+.tm-heatmap-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--tm-text-muted);
+    font-size: 13px;
+}
+
 .tm-corner {
     position: relative;
     background: var(--tm-header-bg);
